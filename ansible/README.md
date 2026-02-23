@@ -14,6 +14,13 @@ Execution modes:
 
 ### 1) Install collections (choose one mode)
 
+`./scripts/ansible-nav run ...` auto-installs base collections from
+`collections/requirements.yml` by default.
+If `RH_AUTOMATION_HUB_TOKEN` is set and `collections/requirements-rh.yml` exists,
+it is selected automatically instead.
+Default is `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`; set
+`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false` to disable bootstrap.
+
 Base dependencies only:
 
 ```bash

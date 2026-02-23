@@ -12,9 +12,14 @@ This document defines the canonical execution contract for ModuLix automation re
 ## Default runtime behavior
 
 - Runs inside toolbox container image:
-  - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.9.3`
+  - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.4.0`
 - `ansible-navigator run` is always executed with `--ee true`.
-- Collections are expected from the configured EE image.
+- Collections are resolved from `ANSIBLE_COLLECTIONS_PATH` with local project overlays first.
+- `ansible/scripts/ansible-nav-local run` bootstraps collections by default
+  (`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`).
+- Default requirements profile: `ansible/collections/requirements.yml`.
+- If `RH_AUTOMATION_HUB_TOKEN` is set and `ansible/collections/requirements-rh.yml`
+  exists, that RH profile is selected automatically.
 
 ## Runtime options
 

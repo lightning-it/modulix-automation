@@ -8,6 +8,14 @@ nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
+auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-true}"
+default_collections_requirements="${REPO_ROOT}/collections/requirements.yml"
+default_collections_requirements_rh="${REPO_ROOT}/collections/requirements-rh.yml"
+collections_requirements="${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}"
+collections_install_path="${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH:-${REPO_ROOT}/collections}"
+collections_stamp_file="${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE:-${collections_install_path}/.requirements.sha256}"
+automation_hub_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL:-https://console.redhat.com/api/automation-hub/content/published/}"
+automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 
 usage() {
   cat <<'EOF'
@@ -20,6 +28,11 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: false)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+  ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: true)
+  ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=<path>  (default: auto-select requirements-rh.yml if RH_AUTOMATION_HUB_TOKEN is set, else requirements.yml)
+  ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
+  ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ./collections/.requirements.sha256)
+  RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, required for certified collections)
 EOF
 }
 
@@ -39,6 +52,129 @@ case "${nav_ee_enabled}" in
     ;;
 esac
 
+case "${auto_collections}" in
+  auto|true|false) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_AUTO_COLLECTIONS='${auto_collections}' (use: auto|true|false)." >&2
+    exit 1
+    ;;
+esac
+
+hash_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${file}" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${file}" | awk '{print $1}'
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "${file}" | awk '{print $NF}'
+    return 0
+  fi
+  cksum "${file}" | awk '{print $1":"$2}'
+}
+
+build_galaxy_config_for_certified() {
+  local token="$1"
+  local config_file=""
+  config_file="$(mktemp /tmp/ansible-galaxy.auto.XXXXXX.cfg)"
+  cat > "${config_file}" <<EOF
+[galaxy]
+server_list = automation_hub,galaxy
+
+[galaxy_server.automation_hub]
+url = ${automation_hub_url}
+auth_url = ${automation_hub_auth_url}
+token = ${token}
+
+[galaxy_server.galaxy]
+url = https://galaxy.ansible.com/
+EOF
+  printf '%s\n' "${config_file}"
+}
+
+ensure_base_collections() {
+  local mode="$1"
+  local requirements_file="$2"
+  local target_path="$3"
+  local stamp_file="$4"
+  local install_reason=""
+  local current_hash=""
+  local stored_hash=""
+  local needs_certified_collections=false
+  local galaxy_config_file=""
+
+  case "${mode}" in
+    false)
+      return 0
+      ;;
+    true)
+      if [[ ! -f "${requirements_file}" ]]; then
+        echo "Missing collections requirements file: ${requirements_file}" >&2
+        return 1
+      fi
+      install_reason="forced by ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true"
+      ;;
+    auto)
+      if [[ ! -f "${requirements_file}" ]]; then
+        return 0
+      fi
+      if [[ ! -d "${target_path}/ansible_collections" ]]; then
+        install_reason="collections cache is missing"
+      else
+        current_hash="$(hash_file "${requirements_file}")"
+        if [[ ! -f "${stamp_file}" ]]; then
+          install_reason="requirements stamp is missing"
+        else
+          stored_hash="$(< "${stamp_file}")"
+          if [[ "${stored_hash}" != "${current_hash}" ]]; then
+            install_reason="requirements changed"
+          fi
+        fi
+      fi
+      ;;
+  esac
+
+  if [[ -z "${install_reason}" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${target_path}"
+  echo "Installing base collections (${install_reason})."
+
+  if grep -Eq "name:[[:space:]]*(ansible\\.controller|ansible\\.eda|ansible\\.hub|infra\\.|redhat\\.satellite)" "${requirements_file}" 2>/dev/null; then
+    needs_certified_collections=true
+  fi
+
+  if [[ "${needs_certified_collections}" == true ]]; then
+    if [[ -z "${RH_AUTOMATION_HUB_TOKEN:-}" ]]; then
+      echo "Warning: certified collections detected in ${requirements_file} but RH_AUTOMATION_HUB_TOKEN is not set." >&2
+      echo "Warning: collection install may fail unless Automation Hub auth is configured elsewhere." >&2
+    else
+      galaxy_config_file="$(build_galaxy_config_for_certified "${RH_AUTOMATION_HUB_TOKEN}")"
+    fi
+  fi
+
+  if [[ -n "${galaxy_config_file}" ]]; then
+    ANSIBLE_CONFIG="${galaxy_config_file}" ansible-galaxy collection install \
+      -r "${requirements_file}" \
+      -p "${target_path}" \
+      --force
+    rm -f "${galaxy_config_file}"
+  else
+    ansible-galaxy collection install \
+      -r "${requirements_file}" \
+      -p "${target_path}" \
+      --force
+  fi
+
+  current_hash="${current_hash:-$(hash_file "${requirements_file}")}"
+  printf '%s\n' "${current_hash}" > "${stamp_file}"
+}
+
 if [[ $# -lt 1 ]]; then
   usage
   exit 1
@@ -55,12 +191,15 @@ if [[ -f "/runner/project/ansible.cfg" ]]; then
 fi
 
 export HOME="${HOME:-/runner}"
+export ANSIBLE_HOME="${ANSIBLE_HOME:-/tmp/.ansible}"
+export ANSIBLE_GALAXY_CACHE_DIR="${ANSIBLE_GALAXY_CACHE_DIR:-${ANSIBLE_HOME}/galaxy_cache}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${nav_cache_dir}}"
 export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH:-${nav_collection_doc_cache_path}}"
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-/tmp}"
 export ANSIBLE_REMOTE_TEMP="${ANSIBLE_REMOTE_TEMP:-/tmp}"
 export ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_COLLECTIONS_PATH:-/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
+mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}"
 
 subcommand="$1"
 shift
@@ -72,6 +211,19 @@ case "${subcommand}" in
       usage
       exit 1
     fi
+    effective_collections_requirements="${collections_requirements}"
+    if [[ -z "${effective_collections_requirements}" ]]; then
+      effective_collections_requirements="${default_collections_requirements}"
+      if [[ -n "${RH_AUTOMATION_HUB_TOKEN:-}" && -f "${default_collections_requirements_rh}" ]]; then
+        effective_collections_requirements="${default_collections_requirements_rh}"
+      fi
+    fi
+    echo "Using collections requirements: ${effective_collections_requirements}"
+    ensure_base_collections \
+      "${auto_collections}" \
+      "${effective_collections_requirements}" \
+      "${collections_install_path}" \
+      "${collections_stamp_file}"
     cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
     if [[ "${nav_ee_enabled}" == "false" ]]; then
       cmd+=(--ee false)

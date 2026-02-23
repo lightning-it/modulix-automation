@@ -17,7 +17,7 @@ ansible-navigator:
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp
         ANSIBLE_REMOTE_TEMP: /tmp
-        ANSIBLE_COLLECTIONS_PATH: "/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/project/collections-dev:/runner/project/collections:/runner/collections"
+        ANSIBLE_COLLECTIONS_PATH: "/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
   mode: stdout
   playbook-artifact:
     enable: false

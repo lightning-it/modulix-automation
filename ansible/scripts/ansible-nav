@@ -24,11 +24,12 @@ Usage:
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.9.3)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.4.0)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
+  RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, for certified collection installs)
 
   ANSIBLE_NAVIGATOR_MOUNT_*
 EOF
@@ -390,16 +391,22 @@ esac
 
 container_args+=(
   -e "HOME=/runner"
+  -e "ANSIBLE_HOME=/tmp/.ansible"
+  -e "ANSIBLE_GALAXY_CACHE_DIR=/tmp/.ansible/galaxy_cache"
   -e "XDG_CACHE_HOME=${nav_cache_dir}"
   -e "ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
   -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
   -e "ANSIBLE_LOCAL_TEMP=/tmp"
   -e "ANSIBLE_REMOTE_TEMP=/tmp"
-  -e "ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/project/collections-dev:/runner/project/collections:/runner/collections"
+  -e "ANSIBLE_COLLECTIONS_PATH=/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
 )
 
 if [[ -n "${VAULT_TOKEN:-}" ]]; then
   container_args+=(-e "VAULT_TOKEN=${VAULT_TOKEN}")
+fi
+
+if [[ -n "${RH_AUTOMATION_HUB_TOKEN:-}" ]]; then
+  container_args+=(-e "RH_AUTOMATION_HUB_TOKEN=${RH_AUTOMATION_HUB_TOKEN}")
 fi
 
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
