@@ -7,10 +7,16 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
 image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0}"
+run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
+rh_collections_mode="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE:-auto}"
+rh_collections_strict="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT:-true}"
+rh_collections_requirements="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS:-${REPO_ROOT}/collections/requirements-rh.yml}"
+rh_collections_target="${ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
+rh_collections_use="${RH_COLLECTIONS_USE:-true}"
 
 inventory_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_INVENTORIES:-auto}"
 ssh_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH:-auto}"
@@ -19,18 +25,24 @@ ssh_agent_mount_requested="${ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT:-auto}"
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/ansible-nav run <playbook.yml> [ansible-navigator run args...]
+  ./scripts/ansible-nav run <playbook.yml> [playbook args...]
   ./scripts/ansible-nav exec -- <command> [args...]
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.9.3)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0)
+  ANSIBLE_TOOLBOX_RUN_EE_IMAGE=<image:tag>        (default: quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3)
+  Playbook 'run' always uses nested podman in toolbox
+  (toolbox run-mode starts privileged as root for inner podman)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
-
-  ANSIBLE_NAVIGATOR_MOUNT_*
+  ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto|always|never (default: auto)
+  ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT=true|false (default: true)
+  ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS=<path> (default: ./collections/requirements-rh.yml)
+  ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET=<path>     (default: ./collections-dev)
+  RH_COLLECTIONS_USE=true|false                    (default: true)
 EOF
 }
 
@@ -41,6 +53,29 @@ validate_tristate() {
     auto|true|false) ;;
     *)
       echo "Invalid ${name}='${value}' (use: auto|true|false)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_bool() {
+  local name="$1"
+  local value="$2"
+  case "${value}" in
+    true|false) ;;
+    *)
+      echo "Invalid ${name}='${value}' (use: true|false)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_rh_collections_mode() {
+  local value="$1"
+  case "${value}" in
+    auto|always|never) ;;
+    *)
+      echo "Invalid ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE='${value}' (use: auto|always|never)." >&2
       exit 1
       ;;
   esac
@@ -258,6 +293,74 @@ rewrite_inventory_spec_for_container() {
   echo "${joined}"
 }
 
+tags_contain_aap() {
+  local spec="${1:-}"
+  local tag
+
+  IFS=',' read -r -a tags <<< "${spec}"
+  for tag in "${tags[@]}"; do
+    tag="$(printf '%s' "${tag}" | tr '[:upper:]' '[:lower:]' | xargs)"
+    case "${tag}" in
+      aap|aap_*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+should_prepare_rh_collections() {
+  local mode="$1"
+  shift
+  local args=("$@")
+  local playbook_path=""
+  local current=""
+
+  case "${mode}" in
+    never)
+      return 1
+      ;;
+    always)
+      return 0
+      ;;
+    auto)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if [[ ${#args[@]} -gt 0 ]]; then
+    playbook_path="${args[0]}"
+    if [[ "${playbook_path,,}" == *aap* ]]; then
+      return 0
+    fi
+  fi
+
+  local i=0
+  while (( i < ${#args[@]} )); do
+    current="${args[$i]}"
+    case "${current}" in
+      -t|--tags)
+        if (( i + 1 < ${#args[@]} )) && tags_contain_aap "${args[$((i + 1))]}"; then
+          return 0
+        fi
+        ((i+=2))
+        continue
+        ;;
+      --tags=*)
+        if tags_contain_aap "${current#--tags=}"; then
+          return 0
+        fi
+        ;;
+    esac
+    ((i+=1))
+  done
+
+  return 1
+}
+
 rewrite_inventory_args() {
   local -n args_ref="$1"
   local out=()
@@ -298,6 +401,9 @@ rewrite_inventory_args() {
 validate_tristate "ANSIBLE_TOOLBOX_MOUNT_INVENTORIES" "${inventory_mount_requested}"
 validate_tristate "ANSIBLE_TOOLBOX_MOUNT_SSH" "${ssh_mount_requested}"
 validate_tristate "ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT" "${ssh_agent_mount_requested}"
+validate_rh_collections_mode "${rh_collections_mode}"
+validate_bool "ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT" "${rh_collections_strict}"
+validate_bool "RH_COLLECTIONS_USE" "${rh_collections_use}"
 
 case "${nav_mode}" in
   stdout|interactive) ;;
@@ -319,6 +425,12 @@ fi
 engine="$(detect_container_engine "${engine_requested}")"
 
 if [[ "${engine}" == "local" ]]; then
+  if [[ "${1:-}" == "run" ]]; then
+    echo "Local fallback is not supported for 'run'." >&2
+    echo "Use host wrapper execution with podman socket: /run/user/$(id -u)/podman/podman.sock" >&2
+    echo "Hint: systemctl --user enable --now podman.socket" >&2
+    exit 1
+  fi
   exec "${SCRIPT_DIR}/ansible-nav-local" "$@"
 fi
 
@@ -328,19 +440,13 @@ if [[ -t 0 && -t 1 ]]; then
 fi
 
 if [[ "${engine}" == "podman" ]]; then
-  container_args+=(--userns=keep-id --security-opt label=disable)
+  container_args+=(--security-opt label=disable)
 fi
 
-container_args+=(--user "$(id -u):$(id -g)")
 container_args+=(-v "${REPO_ROOT}:/runner/project" -w /runner/project)
 
 inventory_mounted=false
 ssh_agent_mounted=false
-
-if container_api_socket="$(find_container_api_socket)"; then
-  container_args+=(-v "${container_api_socket}:/var/run/docker.sock")
-  container_args+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
-fi
 
 case "${inventory_mount_requested}" in
   auto)
@@ -390,22 +496,59 @@ esac
 
 container_args+=(
   -e "HOME=/runner"
+  -e "XDG_CONFIG_HOME=/tmp/.config"
   -e "XDG_CACHE_HOME=${nav_cache_dir}"
   -e "ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
   -e "ANSIBLE_CONFIG=/runner/project/ansible.cfg"
   -e "ANSIBLE_LOCAL_TEMP=/tmp"
   -e "ANSIBLE_REMOTE_TEMP=/tmp"
-  -e "ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/project/collections-dev:/runner/project/collections:/runner/collections"
+  -e "ANSIBLE_COLLECTIONS_PATH=/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
 )
 
 if [[ -n "${VAULT_TOKEN:-}" ]]; then
   container_args+=(-e "VAULT_TOKEN=${VAULT_TOKEN}")
 fi
 
+if [[ -n "${ANSIBLE_HASHI_VAULT_ROLE_ID:-}" ]]; then
+  container_args+=(-e "ANSIBLE_HASHI_VAULT_ROLE_ID=${ANSIBLE_HASHI_VAULT_ROLE_ID}")
+fi
+
+if [[ -n "${ANSIBLE_HASHI_VAULT_SECRET_ID:-}" ]]; then
+  container_args+=(-e "ANSIBLE_HASHI_VAULT_SECRET_ID=${ANSIBLE_HASHI_VAULT_SECRET_ID}")
+fi
+
 if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   vault_pass_file_in_container="$(rewrite_host_path_for_container "${ANSIBLE_VAULT_PASSWORD_FILE}")"
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
 fi
+
+if [[ -n "${AUTOMATION_HUB_TOKEN:-}" ]]; then
+  container_args+=(-e "AUTOMATION_HUB_TOKEN=${AUTOMATION_HUB_TOKEN}")
+fi
+
+if [[ -n "${RH_AUTOMATION_HUB_TOKEN:-}" ]]; then
+  container_args+=(-e "RH_AUTOMATION_HUB_TOKEN=${RH_AUTOMATION_HUB_TOKEN}")
+fi
+
+if [[ -n "${RH_HUB_TOKEN:-}" ]]; then
+  container_args+=(-e "RH_HUB_TOKEN=${RH_HUB_TOKEN}")
+fi
+
+if [[ -n "${AUTOMATION_HUB_GALAXY_SERVER:-}" ]]; then
+  container_args+=(-e "AUTOMATION_HUB_GALAXY_SERVER=${AUTOMATION_HUB_GALAXY_SERVER}")
+fi
+
+for pass_var in \
+  RH_COLLECTIONS_USE \
+  RH_COLLECTIONS_REQUIREMENTS_FILE \
+  RH_COLLECTIONS_TARGET \
+  RH_COLLECTIONS_STRICT \
+  RH_COLLECTIONS_REQUIRED; do
+  pass_value="${!pass_var:-}"
+  if [[ -n "${pass_value}" ]]; then
+    container_args+=(-e "${pass_var}=${pass_value}")
+  fi
+done
 
 if [[ "${ssh_agent_mounted}" == true ]]; then
   container_args+=(-e "SSH_AUTH_SOCK=/runner/ssh-agent.sock")
@@ -420,8 +563,11 @@ subcommand="$1"
 shift
 
 in_container_cmd=()
+run_rh_collection_preflight=false
+execution_image="${image}"
 case "${subcommand}" in
   run)
+    container_args+=(--privileged --user 0:0)
     if [[ $# -lt 1 ]]; then
       echo "Missing playbook path for 'run'." >&2
       usage
@@ -431,21 +577,33 @@ case "${subcommand}" in
     if [[ "${inventory_mounted}" == true ]]; then
       rewrite_inventory_args run_args
     fi
-    # Default execution inside the toolbox should not require a nested
-    # container engine. Delegate to ansible-nav-local (which runs with --ee false).
+    if [[ "${rh_collections_use}" == "true" ]] && should_prepare_rh_collections "${rh_collections_mode}" "${run_args[@]}"; then
+      run_rh_collection_preflight=true
+    fi
+    execution_image="${image}"
     in_container_cmd=(
       env
       "ANSIBLE_TOOLBOX_NAV_MODE=${nav_mode}"
       "ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
-      "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=false"
+      "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true"
+      "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman"
+      "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
       /runner/project/scripts/ansible-nav-local
       run
       "${run_args[@]}"
     )
     ;;
   exec)
+    if [[ "${engine}" == "podman" ]]; then
+      container_args+=(--userns=keep-id)
+    fi
+    container_args+=(--user "$(id -u):$(id -g)")
     if [[ "${1:-}" == "--" ]]; then
       shift
+    fi
+    if container_api_socket="$(find_container_api_socket)"; then
+      container_args+=(-v "${container_api_socket}:/var/run/docker.sock")
+      container_args+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
     fi
     if [[ $# -eq 0 ]]; then
       in_container_cmd=(/bin/bash)
@@ -464,5 +622,19 @@ case "${subcommand}" in
     ;;
 esac
 
-ensure_image_present "${engine}" "${image}" "${pull_policy}"
-exec "${container_args[@]}" "${image}" "${in_container_cmd[@]}"
+ensure_image_present "${engine}" "${execution_image}" "${pull_policy}"
+
+if [[ "${run_rh_collection_preflight}" == true ]]; then
+  rh_collections_requirements_in_container="$(rewrite_host_path_for_container "${rh_collections_requirements}")"
+  rh_collections_target_in_container="$(rewrite_host_path_for_container "${rh_collections_target}")"
+
+  echo "Running RH collection preflight..."
+  "${container_args[@]}" "${execution_image}" \
+    env \
+    "RH_COLLECTIONS_REQUIREMENTS_FILE=${rh_collections_requirements_in_container}" \
+    "RH_COLLECTIONS_TARGET=${rh_collections_target_in_container}" \
+    "RH_COLLECTIONS_STRICT=${rh_collections_strict}" \
+    /runner/project/scripts/install-rh-collections
+fi
+
+exec "${container_args[@]}" "${execution_image}" "${in_container_cmd[@]}"

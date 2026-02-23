@@ -1,12 +1,14 @@
 # Ansible automation
 
-This repo uses `scripts/ansible-nav` as a container wrapper that runs
-`ansible-navigator` and related commands in the toolbox image, so **ansible-navigator is not required** on the host.
+This repo uses `scripts/ansible-nav` as a container wrapper:
+- toolbox image for wrapper/utility execution
+- nested ansible EE image for playbook `run` via Podman in toolbox
+Host installation of `ansible-navigator` is not required.
 
 Execution modes:
 
 - `ansible-nav`: host wrapper (starts toolbox container via Podman/Docker).
-- `ansible-nav-local`: in-container runner (executes `ansible-navigator` directly, no nested container runtime).
+- `ansible-nav-local`: in-container runner (executes `ansible-navigator` directly).
 
 ---
 
@@ -22,11 +24,19 @@ Base dependencies only:
   -p /runner/project/collections --force
 ```
 
-Local collection overlays only (`ansible-collection-*` repos):
-run this after base dependencies are already installed.
+Local collection development mode (`ansible-collection-*` repos):
+builds local collections, applies optional workspace overlays from
+`collections/requirements.yml` (non-`lit.*` entries), and resolves
+collection dependencies from each collection `galaxy.yml`.
 
 ```bash
 ./scripts/install-local-collections
+```
+
+RH extension collections (single public EE model):
+
+```bash
+RH_HUB_TOKEN=<token> ./scripts/install-rh-collections
 ```
 
 ### 2) Run a full Wunderbox rebuild
@@ -45,21 +55,25 @@ run this after base dependencies are already installed.
 
 For full workflows and all variants, see `How-To`.
 
-### 4) Image-only execution (no git clone of modulix repo)
+### 4) Manual nested execution from toolbox image (optional)
 
 If you only have the toolbox image and mount your local Ansible workspace, use
 `ansible-nav-local` directly inside the container:
 
 ```bash
 podman run --rm -it \
-  --userns keep-id \
+  --privileged \
   --security-opt label=disable \
+  --user 0:0 \
   -v "$PWD":/runner/project:Z \
   -w /runner/project \
   -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
   -e HOME=/runner \
   -e ANSIBLE_CONFIG=/runner/project/ansible.cfg \
-  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0 \
+  -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
+  -e ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman \
+  -e ANSIBLE_TOOLBOX_NAV_EE_IMAGE=quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3 \
+  quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0 \
   ansible-nav-local run playbooks/stage-2b/13-aap.yml \
   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 ```
@@ -95,10 +109,16 @@ Choose one install mode:
   -p /runner/project/collections --force
 ```
 
-2) Local collection overlays only:
+2) Local collection development mode (dependencies + local overlays):
 
 ```bash
 ./scripts/install-local-collections
+```
+
+3) RH extension collections at runtime (single public EE model):
+
+```bash
+RH_HUB_TOKEN=<token> ./scripts/install-rh-collections
 ```
 
 Only selected local collections:
@@ -107,7 +127,17 @@ Only selected local collections:
 ./scripts/install-local-collections foundational rhel
 ```
 
-This script only builds and installs local `ansible-collection-*` repos.
+Dependency resolution source of truth in local mode:
+
+- Collection dependencies: each local collection `galaxy.yml`
+- Workspace overlays: `collections/requirements.yml` (non-`lit.*` only)
+- RH extension overlays: `collections/requirements-rh.yml` (Automation Hub source)
+
+Disable workspace overlays when needed:
+
+```bash
+REQUIREMENTS_FILE= ./scripts/install-local-collections
+```
 
 ### Run playbooks
 
@@ -253,21 +283,29 @@ This script only builds and installs local `ansible-collection-*` repos.
 
 ### Runtime wrapper details
 
-`scripts/ansible-nav` runs the toolbox image directly via Podman or Docker and executes `ansible-navigator` inside the container.
+`scripts/ansible-nav` runs the toolbox image directly via Podman or Docker.
 Default image:
-- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0`
+- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0`
 
 In-container usage:
 - `ansible-nav-local` executes `ansible-navigator` directly.
-- `ansible-nav` auto-falls back to `ansible-nav-local` when run inside a container without Podman/Docker.
 
 Wrapper behavior (`scripts/ansible-nav`):
-- When a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the execution environment.
 - External inventories are auto-mounted from `../../ansible-inventory-lit/inventories` to `/runner/project/inventories` when available.
 - When inventory mount is active, `-i inventories/...` is automatically rewritten to `/runner/project/inventories/...` for execution environment compatibility.
 - Host SSH directory is auto-mounted from `~/.ssh` to `/runner/.ssh` so inventory paths like `/runner/.ssh/id_ed25519` work inside the execution environment.
 - Host `SSH_AUTH_SOCK` is auto-mounted to `/runner/ssh-agent.sock` and exported in-container.
-- Runs with host UID/GID and sets `HOME=/runner`.
+- For `exec`, wrapper runs with host UID/GID and sets `HOME=/runner`.
+- For `run`, execution is always nested in toolbox:
+  - toolbox starts as privileged root to support nested podman.
+  - `ansible-nav-local` runs `ansible-navigator` with EE enabled.
+  - inner EE container engine is fixed to `podman`.
+  - run EE image:
+    - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3`).
+- For `exec`, when a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the toolbox container.
+- For AAP runs (`playbook path contains "aap"` or `--tags/-t` includes `aap`), wrapper runs
+  `scripts/install-rh-collections` automatically before playbook execution when
+  `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto` (default).
 
 Inventory mount controls:
 - `ANSIBLE_TOOLBOX_MOUNT_INVENTORIES=auto|true|false` (default: `auto`)
@@ -280,12 +318,28 @@ SSH mount controls:
 
 Image/engine controls:
 - `ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker` (default: `auto`)
-- `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.1.0`)
+- `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0`)
+- `ANSIBLE_TOOLBOX_RUN_EE_IMAGE=<image:tag>` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3`)
 - `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `missing`)
 - `ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive` (default: `stdout`)
-- `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false` (default: `false`)
+- `ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>` (default: ansible-navigator config image)
 - `ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache` (default: `/tmp/.cache`)
 - `ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=/tmp/.cache/ansible-navigator/collection_doc_cache.db`
+- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto|always|never` (default: `auto`)
+- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT=true|false` (default: `true`)
+- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS=./collections/requirements-rh.yml`
+- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET=./collections-dev`
+- `RH_COLLECTIONS_USE=true|false` (default: `true`)
+
+Automation Hub env inputs:
+- `RH_HUB_TOKEN` (preferred)
+- `AUTOMATION_HUB_TOKEN` (fallback)
+- `RH_AUTOMATION_HUB_TOKEN` (fallback)
+- `AUTOMATION_HUB_GALAXY_SERVER` (optional override, default:
+  `https://console.redhat.com/api/automation-hub/content/published/`)
+
+Notes:
+- `RH_AUTOMATION_HUB_TOKEN` offline tokens are used via Automation Hub `auth_url` flow.
 
 ### Vault + Nexus notes
 

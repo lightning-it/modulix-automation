@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+requirements_file="${RH_COLLECTIONS_REQUIREMENTS_FILE:-${REPO_ROOT}/collections/requirements-rh.yml}"
+target_path="${RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
+strict="${RH_COLLECTIONS_STRICT:-true}"
+ah_server="${AUTOMATION_HUB_GALAXY_SERVER:-https://console.redhat.com/api/automation-hub/content/published/}"
+ah_token="${RH_HUB_TOKEN:-${AUTOMATION_HUB_TOKEN:-${RH_AUTOMATION_HUB_TOKEN:-}}}"
+sso_token_url="${AUTOMATION_HUB_SSO_TOKEN_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
+required_collections="${RH_COLLECTIONS_REQUIRED:-ansible.controller}"
+rh_collections_use="${RH_COLLECTIONS_USE:-true}"
+
+if ! command -v ansible-galaxy >/dev/null 2>&1; then
+  if [[ -x "${SCRIPT_DIR}/ansible-nav" ]]; then
+    echo "ansible-galaxy not found in PATH, using ${SCRIPT_DIR}/ansible-nav fallback"
+    exec "${SCRIPT_DIR}/ansible-nav" exec -- /runner/project/scripts/install-rh-collections
+  fi
+  echo "ansible-galaxy not found in PATH and ${SCRIPT_DIR}/ansible-nav is unavailable." >&2
+  exit 1
+fi
+
+export ANSIBLE_HOME="${ANSIBLE_HOME:-/tmp/.ansible}"
+mkdir -p "${ANSIBLE_HOME}"
+
+case "${strict}" in
+  true|false) ;;
+  *)
+    echo "Invalid RH_COLLECTIONS_STRICT='${strict}' (use: true|false)." >&2
+    exit 2
+    ;;
+esac
+
+case "${rh_collections_use}" in
+  true|false) ;;
+  *)
+    echo "Invalid RH_COLLECTIONS_USE='${rh_collections_use}' (use: true|false)." >&2
+    exit 2
+    ;;
+esac
+
+trim_spaces() {
+  local value="$1"
+  printf '%s' "${value}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+run_install_with_auth_url_flow() {
+  local token="$1"
+  local tmp_cfg
+  tmp_cfg="$(mktemp "/tmp/automation-hub-ansible-galaxy.XXXXXX.cfg")"
+
+  cat >"${tmp_cfg}" <<EOF
+[galaxy]
+server_list = automation_hub
+
+[galaxy_server.automation_hub]
+url = ${ah_server}
+auth_url = ${sso_token_url}
+token = ${token}
+EOF
+
+  if ! ANSIBLE_CONFIG="${tmp_cfg}" "${install_cmd_base[@]}" -r "${requirements_file}"; then
+    rm -f "${tmp_cfg}"
+    return 1
+  fi
+
+  rm -f "${tmp_cfg}"
+  return 0
+}
+
+if [[ "${rh_collections_use}" == "false" ]]; then
+  echo "RH collection preflight disabled (RH_COLLECTIONS_USE=false)."
+  exit 0
+fi
+
+ah_token="$(trim_spaces "${ah_token}")"
+
+mkdir -p "${target_path}"
+
+install_cmd_base=(
+  ansible-galaxy collection install
+  --force
+  --no-deps
+  --collections-path "${target_path}"
+)
+
+if [[ -f "${requirements_file}" ]]; then
+  if [[ -n "${ah_token}" ]]; then
+    echo "Installing RH extension collections from ${requirements_file} via Automation Hub"
+    echo "INFO: Using galaxy auth_url flow."
+    if ! run_install_with_auth_url_flow "${ah_token}"; then
+      echo "ERROR: Automation Hub install failed. Provide a valid token (RH_HUB_TOKEN preferred)." >&2
+      exit 1
+    fi
+  else
+    msg="Automation Hub token missing. Set RH_HUB_TOKEN (preferred), AUTOMATION_HUB_TOKEN, or RH_AUTOMATION_HUB_TOKEN to install ${requirements_file}."
+    if [[ "${strict}" == "true" ]]; then
+      echo "${msg}" >&2
+      exit 1
+    fi
+    echo "WARNING: ${msg}" >&2
+  fi
+else
+  echo "Skipping RH extension collections: ${requirements_file} not found."
+fi
+
+if [[ -n "${required_collections}" ]]; then
+  missing=()
+  IFS=',' read -r -a required_items <<< "${required_collections}"
+  for raw_item in "${required_items[@]}"; do
+    item="$(trim_spaces "${raw_item}")"
+    [[ -n "${item}" ]] || continue
+    if [[ "${item}" != *.* ]]; then
+      continue
+    fi
+    ns="${item%%.*}"
+    name="${item#*.}"
+    manifest_path="${target_path}/ansible_collections/${ns}/${name}/MANIFEST.json"
+    if [[ ! -f "${manifest_path}" ]]; then
+      missing+=("${item}")
+    fi
+  done
+
+  if (( ${#missing[@]} > 0 )); then
+    msg="Missing required collections after RH preflight: ${missing[*]}"
+    if [[ "${strict}" == "true" ]]; then
+      echo "${msg}" >&2
+      exit 1
+    fi
+    echo "WARNING: ${msg}" >&2
+  fi
+fi
+
+echo "RH collection preflight completed."

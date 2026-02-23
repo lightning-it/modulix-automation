@@ -6,6 +6,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
+nav_container_engine="${ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE:-podman}"
+nav_ee_image="${ANSIBLE_TOOLBOX_NAV_EE_IMAGE:-}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 
@@ -18,6 +20,8 @@ Usage:
 Environment:
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: false)
+  ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman      (default: podman)
+  ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>         (default: ansible-navigator config/env)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
 EOF
@@ -35,6 +39,14 @@ case "${nav_ee_enabled}" in
   true|false) ;;
   *)
     echo "Invalid ANSIBLE_TOOLBOX_NAV_EE_ENABLED='${nav_ee_enabled}' (use: true|false)." >&2
+    exit 1
+    ;;
+esac
+
+case "${nav_container_engine}" in
+  podman) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE='${nav_container_engine}' (use: podman)." >&2
     exit 1
     ;;
 esac
@@ -61,6 +73,40 @@ export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-/tmp}"
 export ANSIBLE_REMOTE_TEMP="${ANSIBLE_REMOTE_TEMP:-/tmp}"
 export ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_COLLECTIONS_PATH:-/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
+export ANSIBLE_NAVIGATOR_ANSIBLE_RUNNER_ARTIFACT_DIR="${ANSIBLE_NAVIGATOR_ANSIBLE_RUNNER_ARTIFACT_DIR:-/runner/project/.ansible-runner}"
+
+if [[ -z "${XDG_RUNTIME_DIR:-}" || ! -w "${XDG_RUNTIME_DIR}" ]]; then
+  export XDG_RUNTIME_DIR="/tmp/xdg-runtime-$(id -u)"
+fi
+
+mkdir -p "${ANSIBLE_NAVIGATOR_ANSIBLE_RUNNER_ARTIFACT_DIR}" >/dev/null 2>&1 || true
+mkdir -p "${XDG_RUNTIME_DIR}" >/dev/null 2>&1 || true
+chmod 700 "${XDG_RUNTIME_DIR}" >/dev/null 2>&1 || true
+
+if command -v podman >/dev/null 2>&1 && [[ -z "${CONTAINERS_STORAGE_CONF:-}" ]]; then
+  toolbox_storage_root="/tmp/.toolbox-podman"
+  if [[ -d "/runner/project" && -w "/runner/project" ]]; then
+    toolbox_storage_root="/runner/project/.toolbox-podman"
+  fi
+  toolbox_storage_conf="${toolbox_storage_root}/storage.conf"
+  toolbox_storage_runroot="${toolbox_storage_root}/runroot"
+  toolbox_storage_graphroot="${toolbox_storage_root}/graphroot"
+  mkdir -p "${toolbox_storage_runroot}" "${toolbox_storage_graphroot}" >/dev/null 2>&1 || true
+  cat > "${toolbox_storage_conf}" <<'EOF'
+[storage]
+driver = "vfs"
+runroot = "__RUNROOT__"
+graphroot = "__GRAPHROOT__"
+
+[storage.options]
+ignore_chown_errors = "true"
+EOF
+  sed -i \
+    -e "s#__RUNROOT__#${toolbox_storage_runroot}#g" \
+    -e "s#__GRAPHROOT__#${toolbox_storage_graphroot}#g" \
+    "${toolbox_storage_conf}"
+  export CONTAINERS_STORAGE_CONF="${toolbox_storage_conf}"
+fi
 
 subcommand="$1"
 shift
@@ -72,9 +118,12 @@ case "${subcommand}" in
       usage
       exit 1
     fi
-    cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
-    if [[ "${nav_ee_enabled}" == "false" ]]; then
-      cmd+=(--ee false)
+    cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}" --ee "${nav_ee_enabled}")
+    if [[ "${nav_ee_enabled}" == "true" ]]; then
+      cmd+=(--ce "${nav_container_engine}")
+      if [[ -n "${nav_ee_image}" ]]; then
+        cmd+=(--eei "${nav_ee_image}")
+      fi
     fi
     cmd+=(run "$@")
     exec "${cmd[@]}"
