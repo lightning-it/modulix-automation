@@ -6,7 +6,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track toolbox image version references in release-coupled docs",
+      "description": "Track default toolbox image version references in release-coupled docs",
       "managerFilePatterns": [
         "/^docs\\/runtime-contract\\.md$/",
         "/^docs\\/support-matrix\\.md$/"
@@ -28,6 +28,22 @@
         "image=\"\\$\\{ANSIBLE_TOOLBOX_IMAGE:-quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\"}]+)\\}\""
       ],
       "depNameTemplate": "quay.io/l-it/ee-wunder-toolbox-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track ansible run EE image defaults",
+      "managerFilePatterns": [
+        "/^docs\\/runtime-contract\\.md$/",
+        "/^docs\\/support-matrix\\.md$/",
+        "/^ansible\\/scripts\\/ansible-nav$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-ansible-ubi9:(?<currentValue>[^\\s`]+)",
+        "run_ee_image=\"\\$\\{ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay\\.io\\/l-it\\/ee-wunder-ansible-ubi9:(?<currentValue>[^\"}]+)\\}\""
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-ansible-ubi9",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     }

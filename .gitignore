@@ -13,7 +13,6 @@ ansible/*.tar.gz
 # RPM packaging outputs
 packaging/rpm/.rpmbuild/
 packaging/rpm/dist/
-
-# Local Ansible Runner and Toolbox artifacts
+ansible/ansible-automation-platform-containerized-setup-bundle-*.tar.gz
 ansible/.ansible-runner/
 ansible/.toolbox-podman/

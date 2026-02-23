@@ -6,6 +6,8 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
+nav_container_engine="${ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE:-podman}"
+nav_ee_image="${ANSIBLE_TOOLBOX_NAV_EE_IMAGE:-}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-true}"
@@ -26,6 +28,8 @@ Usage:
 Environment:
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true|false        (default: false)
+  ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman      (default: podman)
+  ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>         (default: ansible-navigator config/env)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
   ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: true)

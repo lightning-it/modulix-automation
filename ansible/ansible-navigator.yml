@@ -1,14 +1,16 @@
 ---
 ansible-navigator:
+  ansible-runner:
+    artifact-dir: /runner/project/.ansible-runner
+    rotate-artifacts-count: 10
   execution-environment:
     enabled: true
-    container-engine: auto
+    container-engine: podman
     image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3
     pull:
       policy: missing
     container-options:
-      - "--volume=.:/runner/project"
-      - "--workdir=/runner/project"
+      - "--network=slirp4netns"
     environment-variables:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE

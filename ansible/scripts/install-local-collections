@@ -8,10 +8,13 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 SOURCE_ROOT="${SOURCE_ROOT:-${SOURCE_ROOT_DEFAULT}}"
 TARGET_PATH="${TARGET_PATH:-${REPO_ROOT}/collections-dev}"
 ANSIBLE_NAV="${REPO_ROOT}/scripts/ansible-nav"
+INSTALL_DEPS="${INSTALL_DEPS:-true}"
+REQUIREMENTS_FILE="${REQUIREMENTS_FILE:-${REPO_ROOT}/collections/requirements.yml}"
 
 build_dir=""
 staging_dir=""
 repo_root_abs=""
+filtered_requirements_file=""
 
 cleanup() {
   if [[ -n "${build_dir}" && -d "${build_dir}" ]]; then
@@ -19,6 +22,9 @@ cleanup() {
   fi
   if [[ -n "${staging_dir}" && -d "${staging_dir}" ]]; then
     rm -rf "${staging_dir}"
+  fi
+  if [[ -n "${filtered_requirements_file}" && -f "${filtered_requirements_file}" ]]; then
+    rm -f "${filtered_requirements_file}"
   fi
 }
 
@@ -57,10 +63,14 @@ Options:
                          (default: ../../ from modulix/ansible)
   --target-path <path>   Install path for collections
                          (default: ./collections-dev)
+  --requirements-file <path>
+                         Optional workspace requirements overlay file.
+                         Local lit.* entries are ignored by this script.
+                         (default: ./collections/requirements.yml)
   -h, --help             Show this help
 
 Environment overrides:
-  SOURCE_ROOT, TARGET_PATH
+  SOURCE_ROOT, TARGET_PATH, INSTALL_DEPS, REQUIREMENTS_FILE
 EOF
 }
 
@@ -73,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --target-path)
       TARGET_PATH="$2"
+      shift 2
+      ;;
+    --requirements-file)
+      REQUIREMENTS_FILE="$2"
       shift 2
       ;;
     -h|--help)
@@ -124,6 +138,46 @@ fi
 if [[ ${#collection_dirs[@]} -eq 0 ]]; then
   echo "No collection repos found under ${SOURCE_ROOT}" >&2
   exit 1
+fi
+
+if [[ "${INSTALL_DEPS}" == "true" ]]; then
+  # Auto-include local lit.* dependencies from galaxy.yml so installation
+  # with dependency resolution remains self-contained in local development.
+  added=true
+  while [[ "${added}" == "true" ]]; do
+    added=false
+    for dir in "${collection_dirs[@]}"; do
+      while IFS= read -r dep; do
+        [[ -n "${dep}" ]] || continue
+        dep_short="${dep#lit.}"
+        dep_repo="${SOURCE_ROOT}/ansible-collection-${dep_short}"
+        if [[ -d "${dep_repo}" && -f "${dep_repo}/galaxy.yml" ]]; then
+          already_present=false
+          for existing in "${collection_dirs[@]}"; do
+            if [[ "${existing}" == "${dep_repo}" ]]; then
+              already_present=true
+              break
+            fi
+          done
+          if [[ "${already_present}" == "false" ]]; then
+            collection_dirs+=("${dep_repo}")
+            echo "Including local dependency collection: ${dep}"
+            added=true
+          fi
+        fi
+      done < <(
+        awk -F': *' '
+          $1=="dependencies" { in_deps=1; next }
+          in_deps && /^[^[:space:]]/ { in_deps=0 }
+          in_deps && $1 ~ /^[[:space:]]+lit\.[a-zA-Z0-9_]+$/ {
+            dep=$1
+            gsub(/^[[:space:]]+/, "", dep)
+            print dep
+          }
+        ' "${dir}/galaxy.yml"
+      )
+    done
+  done
 fi
 
 repo_root_abs="$(readlink -f -- "${REPO_ROOT}")"
@@ -196,17 +250,92 @@ else
   install_target="${TARGET_PATH}"
 fi
 
-install_cmd=("${galaxy_exec[@]}" collection install --force --offline --no-deps --collections-path "${install_target}")
-echo "Installing local artifacts only (offline, no deps)"
-if [[ "${use_nav_fallback}" == true ]]; then
-  for artifact in "${artifacts[@]}"; do
-    install_cmd+=("$(host_path_to_runner "${artifact}")")
-  done
-else
-  install_cmd+=("${artifacts[@]}")
+if [[ "${INSTALL_DEPS}" != "true" ]]; then
+  echo "Skipping dependency install (INSTALL_DEPS=${INSTALL_DEPS})"
 fi
 
-"${install_cmd[@]}"
+if [[ "${INSTALL_DEPS}" == "true" && -n "${REQUIREMENTS_FILE}" && -f "${REQUIREMENTS_FILE}" ]]; then
+  if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    echo "python3 with PyYAML is required to process ${REQUIREMENTS_FILE}" >&2
+    echo "Install PyYAML or set REQUIREMENTS_FILE to an empty value to skip workspace overlays." >&2
+    exit 1
+  fi
+  filtered_requirements_file="$(mktemp "${TMPDIR:-/tmp}/local-collections.requirements.XXXXXX.yml")"
+  filtered_count="$(
+    python3 - "$REQUIREMENTS_FILE" "$filtered_requirements_file" <<'PY'
+import sys
+import yaml
+
+src_path, dst_path = sys.argv[1], sys.argv[2]
+with open(src_path, "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+
+collections = data.get("collections") or []
+filtered = []
+for item in collections:
+    if not isinstance(item, dict):
+        continue
+    name = str(item.get("name", "")).strip()
+    if not name:
+        continue
+    if name.startswith("lit."):
+        continue
+    filtered.append(item)
+
+with open(dst_path, "w", encoding="utf-8") as f:
+    yaml.safe_dump({"collections": filtered}, f, sort_keys=False)
+
+print(len(filtered))
+PY
+  )"
+
+  if [[ "${filtered_count}" != "0" ]]; then
+    if [[ "${use_nav_fallback}" == true ]]; then
+      staged_req="${staging_dir}/requirements.workspace.yml"
+      cp "${filtered_requirements_file}" "${staged_req}"
+      req_for_install="$(host_path_to_runner "${staged_req}")"
+    else
+      req_for_install="${filtered_requirements_file}"
+    fi
+    echo "Installing workspace overlay dependencies from ${REQUIREMENTS_FILE} (excluding lit.* entries)"
+    "${galaxy_exec[@]}" collection install --force --no-deps --collections-path "${install_target}" -r "${req_for_install}"
+  fi
+elif [[ "${INSTALL_DEPS}" == "true" && -n "${REQUIREMENTS_FILE}" ]]; then
+  echo "Workspace overlay requirements file not found: ${REQUIREMENTS_FILE}; skipping overlays."
+fi
+
+if [[ "${INSTALL_DEPS}" == "true" ]]; then
+  install_cmd=("${galaxy_exec[@]}" collection install --force --collections-path "${install_target}")
+  echo "Installing local artifacts and resolving dependencies from collection galaxy.yml"
+else
+  install_cmd=("${galaxy_exec[@]}" collection install --force --offline --no-deps --collections-path "${install_target}")
+  echo "Installing local artifacts only (offline, no deps)"
+fi
+
+declare -a artifact_install_args=()
+if [[ "${use_nav_fallback}" == true ]]; then
+  for artifact in "${artifacts[@]}"; do
+    artifact_install_args+=("$(host_path_to_runner "${artifact}")")
+  done
+else
+  artifact_install_args+=("${artifacts[@]}")
+fi
+
+install_cmd+=("${artifact_install_args[@]}")
+
+if [[ "${INSTALL_DEPS}" == "true" ]]; then
+  if ! "${install_cmd[@]}"; then
+    echo "WARNING: dependency resolution failed while installing local artifacts." >&2
+    echo "WARNING: Retrying local artifact install without dependency resolution (--offline --no-deps)." >&2
+    fallback_cmd=("${galaxy_exec[@]}" collection install --force --offline --no-deps --collections-path "${install_target}")
+    fallback_cmd+=("${artifact_install_args[@]}")
+    "${fallback_cmd[@]}"
+    echo "NOTE: Local collections are installed, but unresolved galaxy.yml dependencies were skipped in fallback mode." >&2
+    echo "NOTE: Provide required dependencies via requirements overlay or EE image when needed." >&2
+  fi
+else
+  "${install_cmd[@]}"
+fi
 
 echo
 echo "Installed ${#artifacts[@]} collection(s) into ${TARGET_PATH}"

@@ -8,6 +8,8 @@ It is delivered as the `modulix-scripts` RPM.
 - Delivery artifact: `modulix-scripts` RPM
 - Default runtime: toolbox wrapper + EE (`scripts/ansible-nav`)
 - Runtime payload: Ansible and collection set provided by the configured EE image
+- RH extension collections (AAP/CaC) can be installed at runtime from
+  `ansible/collections/requirements-rh.yml` (Automation Hub token required)
 - Optional runtime: host-native execution (supported with prerequisites)
 
 Canonical release-coupled docs in this repo:
