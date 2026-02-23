@@ -8,8 +8,12 @@ collections-dev/ansible_collections/**
 ansible/.vault-pass.txt
 
 # AAP containerized installer archive (if stored in the repository for deployment).
-ansible/aap-containerized-setup.tar.gz
+ansible/*.tar.gz
 
 # RPM packaging outputs
 packaging/rpm/.rpmbuild/
 packaging/rpm/dist/
+
+# Local Ansible Runner and Toolbox artifacts
+ansible/.ansible-runner/
+ansible/.toolbox-podman/
