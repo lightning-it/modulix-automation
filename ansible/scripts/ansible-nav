@@ -7,7 +7,7 @@ SOURCE_ROOT_DEFAULT="$(cd -- "${REPO_ROOT}/../.." && pwd)"
 
 engine_requested="${ANSIBLE_TOOLBOX_ENGINE:-auto}"
 image="${ANSIBLE_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0}"
-run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.11.4}"
+run_ee_image="${ANSIBLE_TOOLBOX_RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9:v1.11.6}"
 pull_policy="${ANSIBLE_TOOLBOX_PULL_POLICY:-missing}"
 nav_mode="${ANSIBLE_TOOLBOX_NAV_MODE:-stdout}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
