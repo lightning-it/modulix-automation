@@ -514,18 +514,6 @@ if [[ -n "${ANSIBLE_VAULT_PASSWORD_FILE:-}" ]]; then
   container_args+=(-e "ANSIBLE_VAULT_PASSWORD_FILE=${vault_pass_file_in_container}")
 fi
 
-if [[ -n "${AUTOMATION_HUB_TOKEN:-}" ]]; then
-  container_args+=(-e "AUTOMATION_HUB_TOKEN=${AUTOMATION_HUB_TOKEN}")
-fi
-
-if [[ -n "${RH_AUTOMATION_HUB_TOKEN:-}" ]]; then
-  container_args+=(-e "RH_AUTOMATION_HUB_TOKEN=${RH_AUTOMATION_HUB_TOKEN}")
-fi
-
-if [[ -n "${RH_HUB_TOKEN:-}" ]]; then
-  container_args+=(-e "RH_HUB_TOKEN=${RH_HUB_TOKEN}")
-fi
-
 if [[ -n "${AUTOMATION_HUB_GALAXY_SERVER:-}" ]]; then
   container_args+=(-e "AUTOMATION_HUB_GALAXY_SERVER=${AUTOMATION_HUB_GALAXY_SERVER}")
 fi

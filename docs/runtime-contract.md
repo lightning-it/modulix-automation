@@ -49,7 +49,7 @@ Depending on playbook:
 - inventory (`-i ...`)
 - SSH key material (`~/.ssh` and/or ssh-agent)
 - secrets (`ANSIBLE_VAULT_PASSWORD_FILE`, `VAULT_TOKEN`, etc.)
-- for AAP/CaC execution with `requirements-rh.yml`: `RH_HUB_TOKEN` (preferred), `AUTOMATION_HUB_TOKEN`, or `RH_AUTOMATION_HUB_TOKEN`
+- for AAP/CaC execution with `requirements-rh.yml`: `RH_AUTOMATION_HUB_TOKEN`
   - offline token values are used via Automation Hub `auth_url` flow
 
 ## Host-native execution (optional)

@@ -8,7 +8,7 @@ requirements_file="${RH_COLLECTIONS_REQUIREMENTS_FILE:-${REPO_ROOT}/collections/
 target_path="${RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
 strict="${RH_COLLECTIONS_STRICT:-true}"
 ah_server="${AUTOMATION_HUB_GALAXY_SERVER:-https://console.redhat.com/api/automation-hub/content/published/}"
-ah_token="${RH_HUB_TOKEN:-${AUTOMATION_HUB_TOKEN:-${RH_AUTOMATION_HUB_TOKEN:-}}}"
+ah_token="${RH_AUTOMATION_HUB_TOKEN:-}"
 sso_token_url="${AUTOMATION_HUB_SSO_TOKEN_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 required_collections="${RH_COLLECTIONS_REQUIRED:-ansible.controller}"
 rh_collections_use="${RH_COLLECTIONS_USE:-true}"
@@ -91,11 +91,11 @@ if [[ -f "${requirements_file}" ]]; then
     echo "Installing RH extension collections from ${requirements_file} via Automation Hub"
     echo "INFO: Using galaxy auth_url flow."
     if ! run_install_with_auth_url_flow "${ah_token}"; then
-      echo "ERROR: Automation Hub install failed. Provide a valid token (RH_HUB_TOKEN preferred)." >&2
+      echo "ERROR: Automation Hub install failed. Provide a valid RH_AUTOMATION_HUB_TOKEN." >&2
       exit 1
     fi
   else
-    msg="Automation Hub token missing. Set RH_HUB_TOKEN (preferred), AUTOMATION_HUB_TOKEN, or RH_AUTOMATION_HUB_TOKEN to install ${requirements_file}."
+    msg="Automation Hub token missing. Set RH_AUTOMATION_HUB_TOKEN to install ${requirements_file}."
     if [[ "${strict}" == "true" ]]; then
       echo "${msg}" >&2
       exit 1

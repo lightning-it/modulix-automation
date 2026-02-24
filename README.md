@@ -1,6 +1,6 @@
 # ModuLix Automation
 
-ModuLix automation is the delivery source-of-truth for customer automation baselines.
+ModuLix automation is the delivery source-of-truth for platform automation baselines.
 It is delivered as the `modulix-scripts` RPM.
 
 ## Delivery model

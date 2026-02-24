@@ -1,71 +1,58 @@
 # Ansible automation
 
-This repo uses `scripts/ansible-nav` as a container wrapper:
-- toolbox image for wrapper/utility execution
-- nested ansible EE image for playbook `run` via Podman in toolbox
-Host installation of `ansible-navigator` is not required.
+## Overview
 
-Execution modes:
+This repo supports two runtime modes:
 
-- `ansible-nav`: host wrapper (starts toolbox container via Podman/Docker).
-- `ansible-nav-local`: in-container runner (executes `ansible-navigator` directly).
+- As-code mode (`scripts/ansible-nav`): host wrapper that starts the toolbox
+  container and runs playbooks in the nested Ansible EE.
+- In-container mode (`ansible-nav-local`): run directly inside the toolbox
+  container when only container access is available.
 
----
+In both cases, host installation of `ansible-navigator` is not required.
 
-## Quick Start
+## Get Started
 
-### 1) Install collections (choose one mode)
+### As-code mode (`ansible-nav`)
+
+#### 1) Run (collections are handled automatically)
 
 `./scripts/ansible-nav run ...` auto-installs base collections from
 `collections/requirements.yml` by default.
 If `RH_AUTOMATION_HUB_TOKEN` is set and `collections/requirements-rh.yml` exists,
 it is selected automatically instead.
-Default is `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`; set
-`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false` to disable bootstrap.
 
-Base dependencies only:
+`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS` controls this bootstrap behavior:
 
-```bash
-./scripts/ansible-nav exec -- \
-  ansible-galaxy collection install -r /runner/project/collections/requirements.yml \
-  -p /runner/project/collections --force
-```
+- `true` (default): always install collections before `run` (`--force`).
+- `auto`: install only when cache is missing or requirements changed.
+- `false`: do not install; assume collections are already present.
 
-Local collection development mode (`ansible-collection-*` repos):
-builds local collections, applies optional workspace overlays from
-`collections/requirements.yml` (non-`lit.*` entries), and resolves
-collection dependencies from each collection `galaxy.yml`.
+Use `auto` for faster day-to-day operator runs. Use `true` for strict
+reproducibility (for example CI or fresh environments).
+
+For manual collection install modes, see `Tasks` -> `Install collections`.
+
+#### 2) Run a single playbook
 
 ```bash
-./scripts/install-local-collections
+./scripts/ansible-nav run playbooks/<stage-or-service>/<playbook>.yml \
+  -i inventories/corp/inventory.yml --limit <host-or-group>
 ```
 
-RH extension collections (single public EE model):
+#### 3) Run a runbook/service pipeline
 
 ```bash
-RH_HUB_TOKEN=<token> ./scripts/install-rh-collections
+./scripts/ansible-nav run playbooks/services/<service>-rebuild.yml \
+  -i inventories/corp/inventory.yml --limit <host-or-group>
 ```
 
-### 2) Run a full Wunderbox rebuild
+For full workflows and all variants, see `Tasks`.
 
-```bash
-./scripts/ansible-nav run playbooks/services/01-wunderbox-rebuild.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-```
+### In-container mode (`ansible-nav-local`)
 
-### 3) Run a single playbook
-
-```bash
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-```
-
-For full workflows and all variants, see `How-To`.
-
-### 4) Manual nested execution from toolbox image (optional)
-
-If you only have the toolbox image and mount your local Ansible workspace, use
-`ansible-nav-local` directly inside the container:
+If you only have the toolbox image and mount your local workspace, use
+`ansible-nav-local` inside the container:
 
 ```bash
 podman run --rm -it \
@@ -76,20 +63,34 @@ podman run --rm -it \
   -w /runner/project \
   -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
   -e HOME=/runner \
-  -e ANSIBLE_CONFIG=/runner/project/ansible.cfg \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
-  -e ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman \
-  -e ANSIBLE_TOOLBOX_NAV_EE_IMAGE=quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3 \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0 \
-  ansible-nav-local run playbooks/stage-2b/13-aap.yml \
-  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+  ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
+  -i inventories/corp/inventory.yml --limit <host-or-group>
 ```
+
+`ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true` is required in this example because
+`ansible-nav-local` defaults to `--ee false`. EE engine/image and `ANSIBLE_CONFIG`
+come from `ansible-navigator.yml` unless you override them.
+
+Why these container flags are used in this mode:
+
+- `--privileged`: allows nested container execution when `ansible-navigator` starts
+  the inner execution environment container.
+- `--security-opt label=disable`: avoids SELinux labeling conflicts for bind mounts
+  and nested container access on SELinux hosts.
+- `--user 0:0`: runs toolbox as root so nested Podman operations can start reliably.
+
+If you run `ansible-nav-local` with `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=false`, these
+flags are usually not required.
 
 ---
 
-## How-To
+## Tasks
 
-### Use the runtime wrapper
+### As-code mode (`ansible-nav`)
+
+#### Use the runtime wrapper
 
 Default usage:
 
@@ -97,18 +98,13 @@ Default usage:
 ./scripts/ansible-nav run <playbook.yml> -i inventories/corp/inventory.yml --limit <host-or-group>
 ```
 
-Force engine when needed:
+Container engine selection is automatic by default. Manual override is documented in `Reference` (`ANSIBLE_TOOLBOX_ENGINE`).
 
-```bash
-ANSIBLE_TOOLBOX_ENGINE=podman ./scripts/ansible-nav run ...
-ANSIBLE_TOOLBOX_ENGINE=docker ./scripts/ansible-nav run ...
-```
-
-### Install collections
+#### Install collections
 
 Choose one install mode:
 
-1) Base dependencies only (no local collection development):
+1) Base dependencies only (runtime path):
 
 ```bash
 ./scripts/ansible-nav exec -- \
@@ -116,186 +112,58 @@ Choose one install mode:
   -p /runner/project/collections --force
 ```
 
-2) Local collection development mode (dependencies + local overlays):
+2) RH extension collections at runtime (single public EE model):
 
 ```bash
-./scripts/install-local-collections
+RH_AUTOMATION_HUB_TOKEN=<token> ./scripts/install-rh-collections
 ```
 
-3) RH extension collections at runtime (single public EE model):
+#### Internal engineering workflows
+
+This is outside the supported platform operations path.
+It is intended for platform engineering teams that develop or extend collections.
+For controlled development procedures, see:
+
+- `lcp-docs/30-modulix/50-development/00-index.md`
+- `lcp-docs/30-modulix/50-development/01-ansible-collections/10-ansible-collection-development.md`
+
+#### Execute runbooks
+
+Use runbooks as the execution contract for service rollout and rebuild order.
+This README documents runtime mechanics (`ansible-nav` and `ansible-nav-local`),
+while runbook content and sequencing live in:
+
+- `lcp-docs/30-modulix/30-runbooks/00-index.md`
+
+Execution pattern:
 
 ```bash
-RH_HUB_TOKEN=<token> ./scripts/install-rh-collections
+./scripts/ansible-nav run <runbook-or-service-playbook.yml> \
+  -i inventories/corp/inventory.yml --limit <host-or-group>
 ```
 
-Only selected local collections:
+### In-container mode (`ansible-nav-local`)
+
+After starting the toolbox container (see Get Started), use the same playbook
+syntax with `ansible-nav-local`:
 
 ```bash
-./scripts/install-local-collections foundational rhel
-```
-
-Dependency resolution source of truth in local mode:
-
-- Collection dependencies: each local collection `galaxy.yml`
-- Workspace overlays: `collections/requirements.yml` (non-`lit.*` only)
-- RH extension overlays: `collections/requirements-rh.yml` (Automation Hub source)
-
-Disable workspace overlays when needed:
-
-```bash
-REQUIREMENTS_FILE= ./scripts/install-local-collections
-```
-
-### Run playbooks
-
-00 Gateway (baremetal+RHEL9) setup:
-
-```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-baremetal/01-oob-virtualmedia-install.yml \
-  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/01-gateway.yml \
-  -i inventories/corp/inventory.yml --limit gw01.prd.edge.pub.l-it.io
-```
-
-01 vSphere ESXi setup:
-
-```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/01-esxi-os_install.yml \
-  -i inventories/corp/inventory.yml --limit vsphere_esxi
-
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/02-esxi-setup.yml \
-  -i inventories/corp/inventory.yml --limit vsphere_esxi
-```
-
-02 vSphere vCenter setup:
-
-```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/FIXME \
-  -i inventories/corp/inventory.yml --limit vcenter-com.mgmt.corp.l-it.io
-```
-
-10 Firewall (VM+RHEL9) setup:
-
-10.1 DMZ
-
-```bash
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.dmz.corp.l-it.io
-```
-
-10.2 COM
-
-```bash
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.com.corp.l-it.io
-```
-
-10.3 INT
-
-```bash
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.int.corp.l-it.io
-```
-
-10.4 ISO
-
-```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/10-firewall.yml \
-  -i inventories/corp/inventory.yml --limit fw01.prd.iso.corp.l-it.io
-```
-
-20 Workstations (VM+RHEL9) setup:
-
-20.1 DMZ
-
-```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/11-workstation.yml \
-  -i inventories/corp/inventory.yml --limit workstation01.prd.dmz.corp.l-it.io
-```
-
-21 Wunderbox (VM+RHEL9) setup:
-
-```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/12-wunderbox.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-```
-
-21.1 Wunderbox rebuild (single pipeline playbook):
-
-```bash
-./scripts/ansible-nav run playbooks/services/01-wunderbox-rebuild.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
-```
-
-22 AAP (VM+RHEL9) setup:
-
-```bash
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml \
-  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-1/infrastructure-platform-vsphere/20-vm-template.yml \
-  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2a/traditional-operating-systems/rhel9/01-base-setup.yml \
-  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
-
-./scripts/ansible-nav run playbooks/stage-2b/13-aap.yml \
-  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
-```
-
-22.1 AAP rebuild (single pipeline playbook):
-
-```bash
-./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml \
-  -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+ansible-nav-local run <playbook.yml> \
+  -i inventories/corp/inventory.yml --limit <host-or-group>
 ```
 
 ---
 
-## Knowledge Base
+## Reference
 
-### Runtime wrapper details
+### Execution model
+
+#### As-code mode (`ansible-nav`)
 
 `scripts/ansible-nav` runs the toolbox image directly via Podman or Docker.
-Default image:
-- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0`
 
-In-container usage:
-- `ansible-nav-local` executes `ansible-navigator` directly.
+Default toolbox image:
+- `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0`
 
 Wrapper behavior (`scripts/ansible-nav`):
 - External inventories are auto-mounted from `../../ansible-inventory-lit/inventories` to `/runner/project/inventories` when available.
@@ -314,41 +182,27 @@ Wrapper behavior (`scripts/ansible-nav`):
   `scripts/install-rh-collections` automatically before playbook execution when
   `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto` (default).
 
-Inventory mount controls:
-- `ANSIBLE_TOOLBOX_MOUNT_INVENTORIES=auto|true|false` (default: `auto`)
-- `ANSIBLE_TOOLBOX_INVENTORY_SOURCE=/path/to/inventories`
+#### In-container mode (`ansible-nav-local`)
 
-SSH mount controls:
-- `ANSIBLE_TOOLBOX_MOUNT_SSH=auto|true|false` (default: `auto`)
-- `ANSIBLE_TOOLBOX_SSH_SOURCE=/path/to/.ssh`
-- `ANSIBLE_TOOLBOX_MOUNT_SSH_AGENT=auto|true|false` (default: `auto`)
+- Execute from inside toolbox container.
+- `ansible-nav-local` runs `ansible-navigator` directly.
+- Use the same playbook paths, inventory flags, and limits as in as-code mode.
+- EE defaults are taken from `ansible-navigator.yml`.
+- For RH collection profile resolution, provide `RH_AUTOMATION_HUB_TOKEN`.
+- Full runtime variable reference: `../docs/runtime-contract.md`.
 
-Image/engine controls:
-- `ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker` (default: `auto`)
-- `ANSIBLE_TOOLBOX_IMAGE=<image:tag>` (default: `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0`)
-- `ANSIBLE_TOOLBOX_RUN_EE_IMAGE=<image:tag>` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3`)
-- `ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never` (default: `missing`)
-- `ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive` (default: `stdout`)
-- `ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>` (default: ansible-navigator config image)
-- `ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache` (default: `/tmp/.cache`)
-- `ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=/tmp/.cache/ansible-navigator/collection_doc_cache.db`
-- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_MODE=auto|always|never` (default: `auto`)
-- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_STRICT=true|false` (default: `true`)
-- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_REQUIREMENTS=./collections/requirements-rh.yml`
-- `ANSIBLE_TOOLBOX_RH_COLLECTIONS_TARGET=./collections-dev`
-- `RH_COLLECTIONS_USE=true|false` (default: `true`)
+### Inventory and roles
 
-Automation Hub env inputs:
-- `RH_HUB_TOKEN` (preferred)
-- `AUTOMATION_HUB_TOKEN` (fallback)
-- `RH_AUTOMATION_HUB_TOKEN` (fallback)
-- `AUTOMATION_HUB_GALAXY_SERVER` (optional override, default:
-  `https://console.redhat.com/api/automation-hub/content/published/`)
+- Inventory: `inventories/corp/inventory.yml`
+- Roles path: `./roles` (set in `ansible.cfg`)
+- Adjust vars in `group_vars/` and `host_vars/` as needed.
+- Inventory is environment-specific and is not provided as a universal ModuLix baseline.
+- Platform teams must define inventory to match their infrastructure and operating context
+  (host/group model, network zones, access paths, and required runtime inputs).
 
-Notes:
-- `RH_AUTOMATION_HUB_TOKEN` offline tokens are used via Automation Hub `auth_url` flow.
+## Security
 
-### Vault + Nexus notes
+### Secrets flow (Vault/Nexus)
 
 The Vault bootstrap writes its init output to the target only. The repo must not store secrets.
 
@@ -362,15 +216,26 @@ Recommended flow:
 
 Best practice: use a short-lived, least-privilege token for KV read + PKI issue, not a root token.
 
-### Inventory and roles
+### Runtime secret inputs
 
-- Inventory: `inventories/corp/inventory.yml`
-- Roles path: `./roles` (set in `ansible.cfg`)
-- Adjust vars in `group_vars/` and `host_vars/` as needed.
+- Required at runtime, depending on playbook:
+  - `ANSIBLE_VAULT_PASSWORD_FILE`
+  - `VAULT_TOKEN`
+- Do not commit secret values to the repository.
 
-### Secrets
+## Related Docs
 
-- **Do not commit secrets.**
-- Use:
-  - Ansible Vault (`ANSIBLE_VAULT_PASSWORD_FILE`)
-  - SOPS or your preferred secret store
+- `../docs/runtime-contract.md`
+- `../docs/support-matrix.md`
+- `lcp-docs/30-modulix/README.md`
+- `lcp-docs/30-modulix/01-overview.md`
+- `lcp-docs/30-modulix/02-getting-started.md`
+- `lcp-docs/30-modulix/03-automation.md`
+- `lcp-docs/30-modulix/04-security.md`
+- `lcp-docs/30-modulix/05-patching.md`
+- `lcp-docs/30-modulix/20-services/00-index.md`
+- `lcp-docs/30-modulix/30-runbooks/00-index.md`
+- `lcp-docs/30-modulix/40-containers/00-index.md`
+- `lcp-docs/30-modulix/41-rpms/00-index.md`
+- `lcp-docs/30-modulix/42-ansible-collections/00-index.md`
+- `lcp-docs/30-modulix/90-troubleshooting/00-index.md`

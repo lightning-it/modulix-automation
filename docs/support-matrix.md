@@ -6,7 +6,7 @@ This matrix defines supported execution modes for ModuLix automation.
 
 | Mode | Status | Notes |
 |---|---|---|
-| Toolbox wrapper + EE (`ansible/scripts/ansible-nav`) | Supported (default) | Canonical path for customer operations |
+| Toolbox wrapper + EE (`ansible/scripts/ansible-nav`) | Supported (default) | Canonical path for platform operations |
 | Host-native execution | Supported with prerequisites | Operator must ensure equivalent toolchain and collections |
 | Runtime RH extension collection install (`ansible/scripts/install-rh-collections`) | Supported | Single-public-EE model for AAP/CaC dependency delivery |
 
