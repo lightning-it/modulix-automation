@@ -5,12 +5,14 @@ repos:
       - id: yamllint-ansible
         name: yamllint (ansible/)
         language: system
-        entry: ./scripts/wunder-devtools-ee.sh yamllint
+        entry: yamllint
         pass_filenames: true
         files: ^ansible/.*\.(yml|yaml)$
 
       - id: ansible-inventory-validate
-        name: ansible-inventory validate (ansible/)
+        name: ansible-inventory validate (ansible/example)
         language: system
-        entry: ./scripts/wunder-devtools-ee.sh ./scripts/test-ansible.sh
+        entry: >-
+          bash -c 'ansible-inventory -i ansible/inventories/example/inventory.yml
+          --list >/dev/null'
         pass_filenames: false

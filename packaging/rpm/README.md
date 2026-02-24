@@ -9,7 +9,7 @@ This directory contains RPM packaging assets for publishing ModuLix scripts as
   - `/opt/modulix/scripts`
   - `/opt/modulix/ansible` (playbooks, config, collections requirements, scripts)
   - `/opt/modulix/ansible/inventories` is shipped as a dummy baseline only
-    (`corp/inventory.yml` with localhost)
+    (`example/inventory.yml` with localhost)
 - Wrapper commands under `/usr/bin`:
   - `ansible-nav`
   - `ansible-nav-local`

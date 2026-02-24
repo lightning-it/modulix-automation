@@ -30,7 +30,7 @@ Usage:
 
 Environment:
   ANSIBLE_TOOLBOX_ENGINE=auto|podman|docker       (default: auto)
-  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.4.0)
+  ANSIBLE_TOOLBOX_IMAGE=<image:tag>               (default: quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0)
   ANSIBLE_TOOLBOX_PULL_POLICY=missing|always|never (default: missing)
   ANSIBLE_TOOLBOX_NAV_MODE=stdout|interactive      (default: stdout)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
@@ -547,6 +547,30 @@ run_rh_collection_preflight=false
 execution_image="${image}"
 case "${subcommand}" in
   run)
+    run_nav_env=(
+      "ANSIBLE_TOOLBOX_NAV_MODE=${nav_mode}"
+      "ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
+      "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true"
+      "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman"
+      "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
+    )
+
+    if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS}")
+    fi
+
+    if [[ -n "${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=$(rewrite_host_path_for_container "${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS}")")
+    fi
+
+    if [[ -n "${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH:-}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=$(rewrite_host_path_for_container "${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH}")")
+    fi
+
+    if [[ -n "${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE:-}" ]]; then
+      run_nav_env+=("ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=$(rewrite_host_path_for_container "${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE}")")
+    fi
+
     container_args+=(--privileged --user 0:0)
     if [[ $# -lt 1 ]]; then
       echo "Missing playbook path for 'run'." >&2
@@ -563,11 +587,7 @@ case "${subcommand}" in
     execution_image="${image}"
     in_container_cmd=(
       env
-      "ANSIBLE_TOOLBOX_NAV_MODE=${nav_mode}"
-      "ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=${nav_collection_doc_cache_path}"
-      "ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true"
-      "ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman"
-      "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=${run_ee_image}"
+      "${run_nav_env[@]}"
       /runner/project/scripts/ansible-nav-local
       run
       "${run_args[@]}"
