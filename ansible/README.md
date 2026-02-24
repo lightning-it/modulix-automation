@@ -37,36 +37,41 @@ For manual collection install modes, see `Tasks` -> `Install collections`.
 
 ```bash
 ./scripts/ansible-nav run playbooks/<stage-or-service>/<playbook>.yml \
-  -i inventories/corp/inventory.yml --limit <host-or-group>
+  -i inventories/example/inventory.yml --limit <host-or-group>
 ```
 
 #### 3) Run a runbook/service pipeline
 
 ```bash
 ./scripts/ansible-nav run playbooks/services/<service>-rebuild.yml \
-  -i inventories/corp/inventory.yml --limit <host-or-group>
+  -i inventories/example/inventory.yml --limit <host-or-group>
 ```
 
 For full workflows and all variants, see `Tasks`.
 
 ### In-container mode (`ansible-nav-local`)
 
-If you only have the toolbox image and mount your local workspace, use
-`ansible-nav-local` inside the container:
+If you run directly in the toolbox container runtime, use `ansible-nav-local`:
+
+For the container-only operator path, the automation baseline is provided by the
+toolbox image (`modulix-scripts` in the image runtime). You provide only
+environment-specific inputs (inventory, SSH material, and runtime secrets).
 
 ```bash
+INVENTORY_DIR=/path/to/inventories
+
 podman run --rm -it \
   --privileged \
   --security-opt label=disable \
   --user 0:0 \
-  -v "$PWD":/runner/project:Z \
-  -w /runner/project \
-  -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
+  -w /opt/modulix/ansible \
+  -v "$INVENTORY_DIR:/opt/modulix/ansible/inventories:ro" \
+  -v "$HOME/.ssh:/runner/.ssh:ro" \
   -e HOME=/runner \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0 \
   ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
-  -i inventories/corp/inventory.yml --limit <host-or-group>
+  -i inventories/<env>/inventory.yml --limit <host-or-group>
 ```
 
 `ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true` is required in this example because
@@ -95,7 +100,7 @@ flags are usually not required.
 Default usage:
 
 ```bash
-./scripts/ansible-nav run <playbook.yml> -i inventories/corp/inventory.yml --limit <host-or-group>
+./scripts/ansible-nav run <playbook.yml> -i inventories/example/inventory.yml --limit <host-or-group>
 ```
 
 Container engine selection is automatic by default. Manual override is documented in `Reference` (`ANSIBLE_TOOLBOX_ENGINE`).
@@ -139,7 +144,7 @@ Execution pattern:
 
 ```bash
 ./scripts/ansible-nav run <runbook-or-service-playbook.yml> \
-  -i inventories/corp/inventory.yml --limit <host-or-group>
+  -i inventories/example/inventory.yml --limit <host-or-group>
 ```
 
 ### In-container mode (`ansible-nav-local`)
@@ -149,7 +154,7 @@ syntax with `ansible-nav-local`:
 
 ```bash
 ansible-nav-local run <playbook.yml> \
-  -i inventories/corp/inventory.yml --limit <host-or-group>
+  -i inventories/example/inventory.yml --limit <host-or-group>
 ```
 
 ---
@@ -193,7 +198,7 @@ Wrapper behavior (`scripts/ansible-nav`):
 
 ### Inventory and roles
 
-- Inventory: `inventories/corp/inventory.yml`
+- Inventory: `inventories/example/inventory.yml`
 - Roles path: `./roles` (set in `ansible.cfg`)
 - Adjust vars in `group_vars/` and `host_vars/` as needed.
 - Inventory is environment-specific and is not provided as a universal ModuLix baseline.

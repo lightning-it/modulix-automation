@@ -1,5 +1,0 @@
----
-zone_name: int
-vrf_name: CHANGEME_INT_VRF
-default_gateway: 198.51.100.1
-syslog_endpoint: log-int.corp.l-it.io

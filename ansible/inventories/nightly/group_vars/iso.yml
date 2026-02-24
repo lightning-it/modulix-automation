@@ -1,5 +1,0 @@
----
-zone_name: iso
-vrf_name: CHANGEME_ISO_VRF
-default_gateway: 10.0.0.1
-syslog_endpoint: log-iso.corp.l-it.io

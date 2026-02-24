@@ -23,7 +23,7 @@ Canonical release-coupled docs in this repo:
 ```bash
 cd ansible
 ./scripts/ansible-nav run playbooks/services/01-wunderbox-rebuild.yml \
-  -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+  -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 ```
 
 ## Development

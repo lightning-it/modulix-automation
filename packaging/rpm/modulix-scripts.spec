@@ -14,8 +14,8 @@ Requires:       bash
 Requires:       git
 
 %description
-Command-line helper scripts from the ModuLix repository packaged for
-RHEL-compatible systems.
+Command-line helper scripts and Ansible runtime baseline from the ModuLix
+repository packaged for RHEL-compatible systems.
 
 The scripts are installed under /opt/modulix and exposed via wrapper commands
 in %{_bindir}.
@@ -24,21 +24,45 @@ in %{_bindir}.
 %autosetup -n modulix-%{version}
 
 %build
-# Nothing to build for script-only packaging.
+# Nothing to build for script packaging.
 
 %install
 rm -rf %{buildroot}
 
 install -d %{buildroot}/opt/modulix
 cp -a scripts %{buildroot}/opt/modulix/
-install -d %{buildroot}/opt/modulix/ansible
-cp -a ansible/scripts %{buildroot}/opt/modulix/ansible/
+cp -a ansible %{buildroot}/opt/modulix/
+
+# Remove local-only runtime artifacts from packaged payload.
+rm -rf %{buildroot}/opt/modulix/ansible/.toolbox-podman
+rm -f %{buildroot}/opt/modulix/ansible/.vault-pass.txt
+rm -f %{buildroot}/opt/modulix/ansible/ansible-navigator.log
+rm -f %{buildroot}/opt/modulix/ansible/ansible-automation-platform-containerized-setup-bundle-*.tar.gz
+
+# Replace inventories with a neutral dummy baseline.
+rm -rf %{buildroot}/opt/modulix/ansible/inventories
+install -d %{buildroot}/opt/modulix/ansible/inventories/example
+cat > %{buildroot}/opt/modulix/ansible/inventories/README.md <<'EOF'
+# Inventory baseline
+
+The packaged `modulix-scripts` RPM does not ship environment-specific inventory.
+Provide your own inventory in this directory (or mount an external inventory path)
+before running `ansible-nav` / `ansible-nav-local`.
+EOF
+cat > %{buildroot}/opt/modulix/ansible/inventories/example/inventory.yml <<'EOF'
+---
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+EOF
 
 # Ensure script payload is executable.
 find %{buildroot}/opt/modulix -type f -name '*.sh' -exec chmod 0755 {} \;
 chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/ansible-nav
 chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/ansible-nav-local
 chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/install-local-collections
+chmod 0755 %{buildroot}/opt/modulix/ansible/scripts/install-rh-collections
 
 install -d %{buildroot}%{_bindir}
 
@@ -57,16 +81,6 @@ cat > %{buildroot}%{_bindir}/install-local-collections <<'EOF'
 exec /opt/modulix/ansible/scripts/install-local-collections "$@"
 EOF
 
-cat > %{buildroot}%{_bindir}/test-ansible.sh <<'EOF'
-#!/usr/bin/env bash
-exec /opt/modulix/scripts/test-ansible.sh "$@"
-EOF
-
-cat > %{buildroot}%{_bindir}/wunder-devtools-ee.sh <<'EOF'
-#!/usr/bin/env bash
-exec /opt/modulix/scripts/wunder-devtools-ee.sh "$@"
-EOF
-
 cat > %{buildroot}%{_bindir}/clone-all.sh <<'EOF'
 #!/usr/bin/env bash
 exec /opt/modulix/scripts/github/clone-all.sh "$@"
@@ -76,8 +90,6 @@ chmod 0755 \
   %{buildroot}%{_bindir}/ansible-nav \
   %{buildroot}%{_bindir}/ansible-nav-local \
   %{buildroot}%{_bindir}/install-local-collections \
-  %{buildroot}%{_bindir}/test-ansible.sh \
-  %{buildroot}%{_bindir}/wunder-devtools-ee.sh \
   %{buildroot}%{_bindir}/clone-all.sh
 
 %files
@@ -86,8 +98,6 @@ chmod 0755 \
 %{_bindir}/ansible-nav
 %{_bindir}/ansible-nav-local
 %{_bindir}/install-local-collections
-%{_bindir}/test-ansible.sh
-%{_bindir}/wunder-devtools-ee.sh
 %{_bindir}/clone-all.sh
 /opt/modulix
 

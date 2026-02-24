@@ -5,19 +5,23 @@ This directory contains RPM packaging assets for publishing ModuLix scripts as
 
 ## What gets packaged
 
-- Script payload under `/opt/modulix`:
+- Runtime payload under `/opt/modulix`:
   - `/opt/modulix/scripts`
-  - `/opt/modulix/ansible/scripts`
+  - `/opt/modulix/ansible` (playbooks, config, collections requirements, scripts)
+  - `/opt/modulix/ansible/inventories` is shipped as a dummy baseline only
+    (`corp/inventory.yml` with localhost)
 - Wrapper commands under `/usr/bin`:
   - `ansible-nav`
   - `ansible-nav-local`
   - `install-local-collections`
-  - `test-ansible.sh`
-  - `wunder-devtools-ee.sh`
   - `clone-all.sh`
 
 Wrappers are used instead of raw symlinks so scripts that rely on
 `BASH_SOURCE[0]` still resolve their repository-relative paths correctly.
+
+Environment-specific inventory is not packaged. Provide your target inventory by
+mounting it into `/opt/modulix/ansible/inventories` or by updating that path on
+the host/toolbox runtime.
 
 ## Build SRPM
 

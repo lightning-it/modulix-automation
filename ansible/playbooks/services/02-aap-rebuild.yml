@@ -9,7 +9,7 @@
 #
 # Usage:
 # ./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml \
-#   -i inventories/corp/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
+#   -i inventories/example/inventory.yml --limit aap01.prd.dmz.corp.l-it.io
 
 - import_playbook: ../stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml
 - import_playbook: ../stage-1/infrastructure-platform-vsphere/20-vm-template.yml

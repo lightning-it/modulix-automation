@@ -1,5 +1,0 @@
----
-zone_name: dmz
-vrf_name: CHANGEME_DMZ_VRF
-default_gateway: 203.0.113.1
-syslog_endpoint: log-dmz.corp.l-it.io

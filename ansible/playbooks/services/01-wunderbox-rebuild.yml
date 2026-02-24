@@ -9,7 +9,7 @@
 #
 # Usage:
 # ansible-navigator run playbooks/services/01-wunderbox-rebuild.yml \
-#   -i inventories/corp/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+#   -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
 
 - import_playbook: ../stage-1/infrastructure-platform-vsphere/90-vm-destroy.yml
 - import_playbook: ../stage-1/infrastructure-platform-vsphere/20-vm-template.yml

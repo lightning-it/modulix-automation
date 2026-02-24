@@ -8,8 +8,6 @@ Helper scripts for day-to-day automation in this repository.
 scripts/
   ansible-nav
   github/clone-all.sh
-  wunder-devtools-ee.sh
-  test-ansible.sh
 ansible/scripts/
   ansible-nav
   install-local-collections
@@ -57,16 +55,10 @@ podman run --rm \
   pre-commit run --all-files
 ```
 
-Run basic ansible sanity checks:
-
-```bash
-./scripts/test-ansible.sh
-```
-
 Run ansible-navigator wrapper from repository root:
 
 ```bash
-./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml -i inventories/corp/inventory.yml --limit <host>
+./scripts/ansible-nav run playbooks/services/02-aap-rebuild.yml -i inventories/example/inventory.yml --limit <host>
 ```
 
 Behavior note:
