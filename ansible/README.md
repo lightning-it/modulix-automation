@@ -246,7 +246,7 @@ Wrapper behavior (`scripts/ansible-nav`):
   - `ansible-nav-local` runs `ansible-navigator` with EE enabled.
   - inner EE container engine is fixed to `podman`.
   - run EE image:
-    - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.9.3`).
+    - `ANSIBLE_TOOLBOX_RUN_EE_IMAGE` (default: `quay.io/l-it/ee-wunder-ansible-ubi9:v1.10.0`).
 - For `exec`, when a container API socket exists (`/var/run/docker.sock`, `/run/docker.sock`, or `/run/user/$UID/podman/podman.sock`), it is mounted to `/var/run/docker.sock` in the toolbox container.
 - For AAP runs (`playbook path contains "aap"` or `--tags/-t` includes `aap`), wrapper runs
   `scripts/install-rh-collections` automatically before playbook execution when
