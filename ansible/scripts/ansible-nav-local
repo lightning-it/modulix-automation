@@ -202,7 +202,7 @@ export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTI
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-/tmp}"
 export ANSIBLE_REMOTE_TEMP="${ANSIBLE_REMOTE_TEMP:-/tmp}"
-export ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_COLLECTIONS_PATH:-/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
+export ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_COLLECTIONS_PATH:-${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
 mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}"
 if [[ -z "${collections_stamp_file}" ]]; then
   collections_stamp_file="${ANSIBLE_HOME}/collections.requirements.sha256"
