@@ -1,7 +1,7 @@
-# modulix-scripts RPM packaging
+# modulix-automation-runtime RPM packaging
 
 This directory contains RPM packaging assets for publishing ModuLix scripts as
-`modulix-scripts`.
+`modulix-automation-runtime`.
 
 ## What gets packaged
 
@@ -31,7 +31,7 @@ packaging/rpm/build-srpm.sh --version 0.1.0 --release 1
 
 Output:
 
-- `packaging/rpm/dist/modulix-scripts-<version>-<release>.<dist>.src.rpm`
+- `packaging/rpm/dist/modulix-automation-runtime-<version>-<release>.<dist>.src.rpm`
 
 ## Publish to COPR
 
@@ -45,7 +45,7 @@ or with explicit arguments:
 packaging/rpm/publish-copr.sh \
   --owner <copr-owner> \
   --project modulix \
-  --srpm packaging/rpm/dist/modulix-scripts-0.1.0-1.<dist>.src.rpm
+  --srpm packaging/rpm/dist/modulix-automation-runtime-0.1.0-1.<dist>.src.rpm
 ```
 
 This `publish-copr.sh` path is a direct SRPM upload fallback.
@@ -95,7 +95,7 @@ Do not enable both mechanisms unless you intentionally want duplicate builds.
 Use COPR SCM integration with GitHub webhook as documented:
 https://docs.pagure.org/copr.copr/user_documentation.html#github-webhooks
 
-1. In COPR, create package `modulix-scripts` with source type `SCM`.
+1. In COPR, create package `modulix-automation-runtime` with source type `SCM`.
 2. Set clone URL to this repository.
 3. Set build method to `make srpm` (uses `.copr/Makefile`).
 4. Enable auto-rebuild.
@@ -108,8 +108,8 @@ https://docs.pagure.org/copr.copr/user_documentation.html#github-webhooks
 Notes:
 - `.copr/Makefile` runs `packaging/rpm/build-srpm.sh` and puts SRPM into COPR `$(outdir)`.
 - If you use plain tags like `v1.2.3`, configure the webhook URL to include package name as
-  described in COPR docs (e.g. `.../github/<owner>/<project>/modulix-scripts/`).
-- Alternatively, use tags in `modulix-scripts-<version>` format.
+  described in COPR docs (e.g. `.../github/<owner>/<project>/modulix-automation-runtime/`).
+- Alternatively, use tags in `modulix-automation-runtime-<version>` format.
 
 ### CLI setup (matches COPR docs flow)
 
@@ -122,7 +122,7 @@ podman run --rm -it \
   -v "$HOME/.config/copr:/home/wunder/.config/copr:ro,Z" \
   -e COPR_OWNER=<copr-owner> \
   -e COPR_PROJECT=modulix \
-  -e COPR_PACKAGE=modulix-scripts \
+  -e COPR_PACKAGE=modulix-automation-runtime \
   localhost/ee-wunder-devtools-ubi9:local \
   bash /workspace/packaging/rpm/configure-copr-scm.sh
 ```
@@ -130,14 +130,14 @@ podman run --rm -it \
 Host alternative (requires `copr-cli` installed on host):
 
 ```bash
-COPR_OWNER=<copr-owner> COPR_PROJECT=modulix COPR_PACKAGE=modulix-scripts \
+COPR_OWNER=<copr-owner> COPR_PROJECT=modulix COPR_PACKAGE=modulix-automation-runtime \
   packaging/rpm/configure-copr-scm.sh
 ```
 
 This executes `copr-cli add-package-scm` (or `edit-package-scm`) with:
 - `--method make_srpm`
 - `--webhook-rebuild on`
-- package `modulix-scripts`
+- package `modulix-automation-runtime`
 
 Optional webhook secret rotation:
 
@@ -156,7 +156,7 @@ podman run --rm -it \
   -v "$HOME/.config/copr:/home/wunder/.config/copr:ro,Z" \
   -e COPR_OWNER=<copr-owner> \
   -e COPR_PROJECT=modulix \
-  -e COPR_PACKAGE=modulix-scripts \
+  -e COPR_PACKAGE=modulix-automation-runtime \
   localhost/ee-wunder-devtools-ubi9:local \
   bash -lc 'bash /workspace/packaging/rpm/configure-copr-scm.sh --webhook-rebuild off'
 ```

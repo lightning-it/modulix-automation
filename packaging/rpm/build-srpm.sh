@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
-SPEC_FILE="${SCRIPT_DIR}/modulix-scripts.spec"
+SPEC_FILE="${SCRIPT_DIR}/modulix-automation-runtime.spec"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
 RPMBUILD_TOPDIR="${SCRIPT_DIR}/.rpmbuild"
 
@@ -17,7 +17,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Build a source RPM for modulix-scripts.
+Build a source RPM for modulix-automation-runtime.
 
 Usage:
   packaging/rpm/build-srpm.sh [options]
@@ -25,13 +25,13 @@ Usage:
 Options:
   --version <v>     RPM version (default: latest git tag without leading v, or 0.1.0)
   --release <r>     RPM release number (default: 1)
-  --spec <path>     Spec file path (default: packaging/rpm/modulix-scripts.spec)
+  --spec <path>     Spec file path (default: packaging/rpm/modulix-automation-runtime.spec)
   --output-dir <d>  Output directory for the src.rpm (default: packaging/rpm/dist)
   -h, --help        Show help
 
 Examples:
   packaging/rpm/build-srpm.sh --version 0.1.0 --release 1
-  packaging/rpm/build-srpm.sh --spec packaging/rpm/modulix-scripts.spec
+  packaging/rpm/build-srpm.sh --spec packaging/rpm/modulix-automation-runtime.spec
   MODULIX_RPM_VERSION=0.1.1 packaging/rpm/build-srpm.sh
 EOF
 }

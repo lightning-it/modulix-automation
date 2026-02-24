@@ -30,7 +30,7 @@ podman run --rm \
   -v "$PWD":/workspace:Z \
   -w /workspace \
   quay.io/l-it/ee-wunder-devtools-ubi9:v1.6.0 \
-  bash -lc 'set -euo pipefail; rpmspec -P packaging/rpm/modulix-scripts.spec >/tmp/modulix.spec.out; ./packaging/rpm/build-srpm.sh --version 0.1.0 --release 1'
+  bash -lc 'set -euo pipefail; rpmspec -P packaging/rpm/modulix-automation-runtime.spec >/tmp/modulix.spec.out; ./packaging/rpm/build-srpm.sh --version 0.1.0 --release 1'
 ```
 
 ## RPM validation fallback

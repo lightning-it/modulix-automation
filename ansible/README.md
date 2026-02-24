@@ -86,6 +86,7 @@ podman run --rm -it \
   -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
   -e HOME=/runner \
   -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true \
+  -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false \
   -e ANSIBLE_VAULT_PASSWORD_FILE=/opt/modulix/ansible/.vault-pass.txt \
   quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.0 \
   ansible-nav-local run playbooks/<stage-or-service>/<playbook>.yml \
@@ -96,6 +97,19 @@ podman run --rm -it \
 `ansible-nav-local` defaults to `--ee false`. EE image/engine defaults come from
 `ansible-navigator.yml`. `ANSIBLE_CONFIG` defaults to the active workspace
 `ansible.cfg`.
+
+In RPM baseline mode (`/opt/modulix/ansible`), collection bootstrap defaults to
+`ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false` (offline-safe). Collections are expected
+to be pre-installed in the runtime. Set `ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false`
+explicitly in container-in commands to avoid inherited host environment values.
+Enable bootstrap only when intentionally refreshing collections in connected
+environments, for example `-e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=true`.
+
+Offline operation requirements in RPM baseline mode:
+
+- toolbox image includes `modulix-automation-runtime` payload (`/opt/modulix/ansible`)
+- run EE image from `ansible-navigator.yml` is already available to the nested container engine
+- required collections/roles are present in that run EE image (for example `fedora.linux_system_roles`)
 
 Why these container flags are used in this mode:
 

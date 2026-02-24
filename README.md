@@ -1,11 +1,11 @@
 # ModuLix Automation
 
 ModuLix automation is the delivery source-of-truth for platform automation baselines.
-It is delivered as the `modulix-scripts` RPM.
+It is delivered as the `modulix-automation-runtime` RPM.
 
 ## Delivery model
 
-- Delivery artifact: `modulix-scripts` RPM
+- Delivery artifact: `modulix-automation-runtime` RPM
 - Default runtime: toolbox wrapper + EE (`scripts/ansible-nav`)
 - Runtime payload: Ansible and collection set provided by the configured EE image
 - RH extension collections (AAP/CaC) can be installed at runtime from

@@ -12,7 +12,7 @@ create_project=false
 
 usage() {
   cat <<'EOF'
-Publish a modulix-scripts SRPM to Fedora COPR.
+Publish a modulix-automation-runtime SRPM to Fedora COPR.
 
 Prerequisites:
   - copr-cli installed
@@ -31,7 +31,7 @@ Options:
 
 Examples:
   COPR_OWNER=lightning-it packaging/rpm/publish-copr.sh --create-project
-  packaging/rpm/publish-copr.sh --owner lightning-it --project modulix --srpm packaging/rpm/dist/modulix-scripts-0.1.0-1.src.rpm
+  packaging/rpm/publish-copr.sh --owner lightning-it --project modulix --srpm packaging/rpm/dist/modulix-automation-runtime-0.1.0-1.src.rpm
 EOF
 }
 

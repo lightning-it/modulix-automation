@@ -19,7 +19,7 @@ name: RPM SRPM CI
       spec_path:
         description: Spec file path (passed to build script)
         required: false
-        default: "packaging/rpm/modulix-scripts.spec"
+        default: "packaging/rpm/modulix-automation-runtime.spec"
       output_dir:
         description: SRPM output directory
         required: false
@@ -91,7 +91,7 @@ jobs:
           fi
 
           build_script_input="${{ github.event.inputs.build_script || 'packaging/rpm/build-srpm.sh' }}"
-          spec_path_input="${{ github.event.inputs.spec_path || 'packaging/rpm/modulix-scripts.spec' }}"
+          spec_path_input="${{ github.event.inputs.spec_path || 'packaging/rpm/modulix-automation-runtime.spec' }}"
           output_dir_input="${{ github.event.inputs.output_dir || 'packaging/rpm/dist' }}"
           srpm_glob_input="${{ github.event.inputs.srpm_glob || '*.src.rpm' }}"
           artifact_prefix_input="${{ github.event.inputs.artifact_prefix || 'srpm' }}"

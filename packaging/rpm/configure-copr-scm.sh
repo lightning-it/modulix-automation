@@ -3,17 +3,17 @@ set -euo pipefail
 
 owner="${COPR_OWNER:-}"
 project="${COPR_PROJECT:-modulix}"
-package="${COPR_PACKAGE:-modulix-scripts}"
+package="${COPR_PACKAGE:-modulix-automation-runtime}"
 clone_url="${COPR_CLONE_URL:-https://github.com/lightning-it/modulix-automation.git}"
 commitish="${COPR_COMMIT:-main}"
 subdir="${COPR_SUBDIR:-.}"
-spec_path="${COPR_SPEC:-packaging/rpm/modulix-scripts.spec}"
+spec_path="${COPR_SPEC:-packaging/rpm/modulix-automation-runtime.spec}"
 webhook_rebuild="${COPR_WEBHOOK_REBUILD:-on}"
 rotate_webhook_secret=false
 
 usage() {
   cat <<'EOF'
-Configure a COPR SCM package for modulix-scripts (GitHub webhook flow).
+Configure a COPR SCM package for modulix-automation-runtime (GitHub webhook flow).
 
 This wraps:
   copr-cli add-package-scm / edit-package-scm
@@ -25,11 +25,11 @@ Usage:
 Options:
   --owner <name>          COPR owner (required if COPR_OWNER is unset)
   --project <name>        COPR project (default: modulix)
-  --package <name>        COPR package name (default: modulix-scripts)
+  --package <name>        COPR package name (default: modulix-automation-runtime)
   --clone-url <url>       SCM clone URL (default: https://github.com/lightning-it/modulix-automation.git)
   --commit <ref>          Git branch/tag/sha to build (default: main)
   --subdir <path>         Subdirectory in repository (default: .)
-  --spec <path>           Spec path relative to subdir (default: packaging/rpm/modulix-scripts.spec)
+  --spec <path>           Spec path relative to subdir (default: packaging/rpm/modulix-automation-runtime.spec)
   --webhook-rebuild on|off  Enable webhook rebuilds (default: on)
   --rotate-webhook-secret Regenerate webhook secret in COPR
   -h, --help              Show this help

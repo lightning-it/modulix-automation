@@ -10,7 +10,14 @@ nav_container_engine="${ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE:-podman}"
 nav_ee_image="${ANSIBLE_TOOLBOX_NAV_EE_IMAGE:-}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
-auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS:-true}"
+if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS+x}" ]]; then
+  auto_collections="${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS}"
+elif [[ "${REPO_ROOT}" == "/opt/modulix/ansible" ]]; then
+  # RPM/container-in runtime is expected to be self-contained and offline-safe.
+  auto_collections="false"
+else
+  auto_collections="true"
+fi
 default_collections_requirements="${REPO_ROOT}/collections/requirements.yml"
 default_collections_requirements_rh="${REPO_ROOT}/collections/requirements-rh.yml"
 collections_requirements="${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}"
@@ -32,7 +39,7 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>         (default: ansible-navigator config/env)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
-  ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: true)
+  ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
   ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS=<path>  (default: auto-select requirements-rh.yml if RH_AUTOMATION_HUB_TOKEN is set, else requirements.yml)
   ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
   ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ${ANSIBLE_HOME}/collections.requirements.sha256)
@@ -202,7 +209,16 @@ export ANSIBLE_NAVIGATOR_COLLECTION_DOC_CACHE_PATH="${ANSIBLE_NAVIGATOR_COLLECTI
 export ANSIBLE_CONFIG="${ANSIBLE_CONFIG:-${default_ansible_config}}"
 export ANSIBLE_LOCAL_TEMP="${ANSIBLE_LOCAL_TEMP:-/tmp}"
 export ANSIBLE_REMOTE_TEMP="${ANSIBLE_REMOTE_TEMP:-/tmp}"
-export ANSIBLE_COLLECTIONS_PATH="${ANSIBLE_COLLECTIONS_PATH:-${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections}"
+legacy_collections_path_default="/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/project/collections-dev:/runner/project/collections:/runner/collections"
+# Include both workspace-local and EE-mounted project paths.
+# In RPM baseline mode, REPO_ROOT is /opt/modulix/ansible in toolbox, while
+# the nested EE sees the same project under /runner/project.
+dynamic_collections_path_default="${REPO_ROOT}/collections-dev:${REPO_ROOT}/collections:/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
+if [[ -z "${ANSIBLE_COLLECTIONS_PATH:-}" || "${ANSIBLE_COLLECTIONS_PATH}" == "${legacy_collections_path_default}" ]]; then
+  export ANSIBLE_COLLECTIONS_PATH="${dynamic_collections_path_default}"
+else
+  export ANSIBLE_COLLECTIONS_PATH
+fi
 mkdir -p "${ANSIBLE_HOME}" "${ANSIBLE_GALAXY_CACHE_DIR}"
 if [[ -z "${collections_stamp_file}" ]]; then
   collections_stamp_file="${ANSIBLE_HOME}/collections.requirements.sha256"

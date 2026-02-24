@@ -1,7 +1,7 @@
 %global modulix_version %{?_modulix_version:%{_modulix_version}}%{!?_modulix_version:0.1.0}
 %global modulix_release %{?_modulix_release:%{_modulix_release}}%{!?_modulix_release:1}
 
-Name:           modulix-scripts
+Name:           modulix-automation-runtime
 Version:        %{modulix_version}
 Release:        %{modulix_release}%{?dist}
 Summary:        ModuLix helper scripts for toolbox workflows
@@ -9,6 +9,8 @@ License:        GPL-2.0-only
 URL:            https://github.com/lightning-it/modulix-automation
 Source0:        modulix-%{version}.tar.gz
 BuildArch:      noarch
+Provides:       modulix-scripts = %{version}-%{release}
+Obsoletes:      modulix-scripts < %{version}-%{release}
 
 Requires:       bash
 Requires:       git
@@ -45,7 +47,7 @@ install -d %{buildroot}/opt/modulix/ansible/inventories/example
 cat > %{buildroot}/opt/modulix/ansible/inventories/README.md <<'EOF'
 # Inventory baseline
 
-The packaged `modulix-scripts` RPM does not ship environment-specific inventory.
+The packaged `modulix-automation-runtime` RPM does not ship environment-specific inventory.
 Provide your own inventory in this directory (or mount an external inventory path)
 before running `ansible-nav` / `ansible-nav-local`.
 EOF
