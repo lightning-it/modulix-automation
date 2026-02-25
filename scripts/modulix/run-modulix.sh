@@ -32,12 +32,15 @@ export INVENTORY_DIR="${2}"
 shift 2
 
 if [[ -z "${VAULT_PASS_FILE:-}" ]]; then
-  VAULT_PASS_FILE="/home/rene/sources/modulix-automation/ansible/.vault-pass.txt"
+  VAULT_PASS_FILE="${PWD}/.vault-pass.txt"
 fi
 export VAULT_PASS_FILE
 export CON_REGISTRY=quay.io/l-it
-export RUN_EE_IMAGE="${CON_REGISTRY}/ee-wunder-ansible-ubi9-certified:v1.11.6"
-export RUN_TOOLBOX_IMAGE="${CON_REGISTRY}/ee-wunder-toolbox-ubi9:v1.5.4"
+export RUN_EE_IMAGE="${RUN_EE_IMAGE:-${CON_REGISTRY}/ee-wunder-ansible-ubi9-certified:v1.11.6}"
+export RUN_TOOLBOX_IMAGE="${RUN_TOOLBOX_IMAGE:-localhost/ee-wunder-toolbox-ubi9:local-modulix-rpmtest}"
+if [[ -n "${AAP_BUNDLE_FILE:-}" && "${AAP_BUNDLE_FILE}" != /* ]]; then
+  export AAP_BUNDLE_FILE="${PWD}/${AAP_BUNDLE_FILE}"
+fi
 export AUTHFILE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/containers/auth.json"
 
 quay_login() {
@@ -47,7 +50,66 @@ quay_login() {
 
 pull_image() {
   local image="$1"
+
+  if [[ "$image" == localhost/* ]]; then
+    if podman image exists "$image"; then
+      echo "Using local image: $image" >&2
+      return 0
+    fi
+    echo "Error: local image not found: $image" >&2
+    echo "Hint: build it first (example):" >&2
+    echo "  podman build --format docker -t $image /home/rene/sources/container-ee-wunder-toolbox-ubi9" >&2
+    exit 1
+  fi
+
   podman pull --authfile "$AUTHFILE" "$image" 1>&2
+}
+
+image_is_remote() {
+  local image="$1"
+  [[ "$image" != localhost/* ]]
+}
+
+login_if_remote_images_present() {
+  local image=""
+  for image in "$@"; do
+    if image_is_remote "$image"; then
+      quay_login
+      return 0
+    fi
+  done
+}
+
+build_bundle_mount_args() {
+  local -n _bundle_mount_ref="$1"
+  _bundle_mount_ref=()
+
+  local bundle_path="${AAP_BUNDLE_FILE:-}"
+  if [[ -n "$bundle_path" ]]; then
+    if [[ ! -f "$bundle_path" ]]; then
+      echo "Error: AAP_BUNDLE_FILE not found: $bundle_path" >&2
+      exit 1
+    fi
+  else
+    local matches=()
+    shopt -s nullglob
+    matches=( "$PWD"/ansible-automation-platform-containerized-setup-bundle-*.tar.gz )
+    shopt -u nullglob
+    if [[ ${#matches[@]} -gt 0 ]]; then
+      bundle_path="${matches[0]}"
+    fi
+  fi
+
+  if [[ -z "$bundle_path" ]]; then
+    return 0
+  fi
+
+  local bundle_name=""
+  bundle_name="$(basename "$bundle_path")"
+  echo "Using bundle from current directory: $bundle_path" >&2
+  _bundle_mount_ref=(
+    -v "$bundle_path:/opt/modulix/ansible/$bundle_name:ro,Z"
+  )
 }
 
 require_nonempty_file() {
@@ -103,6 +165,9 @@ require_env_var() {
 }
 
 run_in_toolbox_interactive() {
+  local bundle_mount=()
+  build_bundle_mount_args bundle_mount
+
   local env_args=(
     -e HOME=/runner
     -e REGISTRY_AUTH_FILE=/runner/.config/containers/auth.json
@@ -120,6 +185,7 @@ run_in_toolbox_interactive() {
     --security-opt label=disable \
     --user 0:0 \
     -w /opt/modulix/ansible \
+    "${bundle_mount[@]}" \
     -v "$INVENTORY_DIR:/opt/modulix/ansible/inventories:ro,Z" \
     -v "$VAULT_PASS_FILE:/opt/modulix/ansible/.vault-pass.txt:ro,Z" \
     -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
@@ -130,6 +196,9 @@ run_in_toolbox_interactive() {
 }
 
 run_in_toolbox_batch() {
+  local bundle_mount=()
+  build_bundle_mount_args bundle_mount
+
   local env_args=(
     -e HOME=/runner
     -e REGISTRY_AUTH_FILE=/runner/.config/containers/auth.json
@@ -147,6 +216,7 @@ run_in_toolbox_batch() {
     --security-opt label=disable \
     --user 0:0 \
     -w /opt/modulix/ansible \
+    "${bundle_mount[@]}" \
     -v "$INVENTORY_DIR:/opt/modulix/ansible/inventories:ro,Z" \
     -v "$VAULT_PASS_FILE:/opt/modulix/ansible/.vault-pass.txt:ro,Z" \
     -v "$HOME/.ssh:/runner/.ssh:ro,Z" \
@@ -257,7 +327,7 @@ run_services() {
     run_args+=( -e "vault_token=${VAULT_TOKEN}" )
   fi
 
-  quay_login
+  login_if_remote_images_present "$RUN_EE_IMAGE" "$RUN_TOOLBOX_IMAGE"
   pull_image "$RUN_EE_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
 
@@ -288,7 +358,7 @@ run_vault_root_token() {
     esac
   done
 
-  quay_login
+  login_if_remote_images_present "$RUN_TOOLBOX_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
 
   run_in_toolbox_batch bash -lc '

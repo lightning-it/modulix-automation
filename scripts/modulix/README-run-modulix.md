@@ -1,33 +1,47 @@
 # run-modulix.sh
 
+Playbooks are executed from the container image. Only inventory, vault password file, SSH auth, and optional AAP bundle are mounted from host.
+
 ```bash
-export INVENTORY_DIR=/home/rene/sources/ansible-inventory-lit/inventories
-export VAULT_PASS_FILE=/home/rene/sources/modulix-automation/ansible/.vault-pass.txt
+export INVENTORY_DIR="$PWD/ansible-inventory-lit/inventories"
+export VAULT_PASS_FILE="$PWD/.vault-pass.txt"
 test -s "$VAULT_PASS_FILE"  # required: Ansible Vault password file (.vault-pass.txt)
 ```
 
 ```bash
+# default toolbox image used by the script:
+podman build --format docker \
+  -t localhost/ee-wunder-toolbox-ubi9:local-modulix-rpmtest \
+  /home/rene/sources/container-ee-wunder-toolbox-ubi9
+```
+
+```bash
+# optional for AAP: bundle is auto-mounted from $PWD if file exists
+ls -1 ansible-automation-platform-containerized-setup-bundle-*.tar.gz
+```
+
+```bash
 export VAULT_TOKEN="$(
-  /home/rene/sources/modulix-automation/scripts/modulix/run-modulix.sh --inventory "$INVENTORY_DIR" vault root-token
+  ./run-modulix.sh --inventory "$INVENTORY_DIR" vault root-token
 )"
 ```
 
 ```bash
-/home/rene/sources/modulix-automation/scripts/modulix/run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox \
+./run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox \
   -i inventories/corp/inventory.yml --limit <HOST>
 ```
 
 ```bash
-/home/rene/sources/modulix-automation/scripts/modulix/run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox --rebuild \
+./run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox --rebuild \
   -i inventories/corp/inventory.yml --limit <HOST>
 ```
 
 ```bash
-/home/rene/sources/modulix-automation/scripts/modulix/run-modulix.sh --inventory "$INVENTORY_DIR" services aap \
+./run-modulix.sh --inventory "$INVENTORY_DIR" services aap \
   -i inventories/corp/inventory.yml --limit <HOST>
 ```
 
 ```bash
-/home/rene/sources/modulix-automation/scripts/modulix/run-modulix.sh --inventory "$INVENTORY_DIR" services aap --rebuild \
+./run-modulix.sh --inventory "$INVENTORY_DIR" services aap --rebuild \
   -i inventories/corp/inventory.yml --limit <HOST>
 ```

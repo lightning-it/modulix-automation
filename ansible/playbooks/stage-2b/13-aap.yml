@@ -32,6 +32,11 @@
       when: (firewall | default([], true) | length) > 0
       tags: [firewall]
 
+    - name: Seed AAP passwords from Vault (optional, backend orchestration outside role)
+      ansible.builtin.import_tasks: tasks/aap_seed_passwords_vault.yml
+      when: aap_password_seed_enabled | default(false) | bool
+      tags: [aap, aap_deploy, aap_passwords, vault]
+
     - name: Prepare AAP shared context
       ansible.builtin.include_role:
         name: lit.supplementary.aap
