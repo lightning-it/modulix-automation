@@ -1,0 +1,361 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  run-modulix.sh --inventory <PATH> services <wunderbox|aap> [--rebuild] [ansible args...]
+  run-modulix.sh --inventory <PATH> vault root-token [--vault-file <PATH>]
+  run-modulix.sh --inventory <PATH> vault export-token [--vault-file <PATH>]
+USAGE
+}
+
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+abs_path() {
+  local p="$1"
+  [[ "$p" == /* ]] || p="$PWD/$p"
+  readlink -f -- "$p"
+}
+
+runner_path() {
+  local p
+  p="$(abs_path "$1")"
+  case "$p" in
+    "$PWD_ABS") echo "/runner/project" ;;
+    "$PWD_ABS"/*) echo "/runner/project/${p#"$PWD_ABS"/}" ;;
+    *) die "path must be inside current directory ($PWD_ABS): $1" ;;
+  esac
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+[[ "${1:-}" == "--inventory" && -n "${2:-}" ]] || {
+  usage
+  die "missing required --inventory <PATH>"
+}
+
+PWD_ABS="$(readlink -f -- "$PWD")"
+INVENTORY_DIR="$(abs_path "$2")"
+shift 2
+
+case "$INVENTORY_DIR" in
+  "$PWD_ABS"|"$PWD_ABS"/*) ;;
+  *) die "--inventory must be inside current directory ($PWD_ABS): $INVENTORY_DIR" ;;
+esac
+[[ -d "$INVENTORY_DIR" ]] || die "--inventory is not a directory: $INVENTORY_DIR"
+
+RUN_EE_IMAGE="${RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9-certified:v1.11.6}"
+RUN_TOOLBOX_IMAGE="${RUN_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.4}"
+VAULT_PASS_FILE="$(abs_path "${VAULT_PASS_FILE:-$PWD_ABS/.vault-pass.txt}")"
+AUTHFILE="$(abs_path "${AUTHFILE:-$PWD_ABS/.podman-auth.json}")"
+
+case "$VAULT_PASS_FILE" in
+  "$PWD_ABS"|"$PWD_ABS"/*) ;;
+  *) die "VAULT_PASS_FILE must be inside current directory ($PWD_ABS): $VAULT_PASS_FILE" ;;
+esac
+[[ -f "$VAULT_PASS_FILE" && -r "$VAULT_PASS_FILE" && -s "$VAULT_PASS_FILE" ]] || {
+  die "required file missing or unreadable: $VAULT_PASS_FILE"
+}
+
+case "$AUTHFILE" in
+  "$PWD_ABS"|"$PWD_ABS"/*) ;;
+  *) die "AUTHFILE must be inside current directory ($PWD_ABS): $AUTHFILE" ;;
+esac
+
+RUNNER_INVENTORY_DIR="$(runner_path "$INVENTORY_DIR")"
+RUNNER_VAULT_PASS_FILE="$(runner_path "$VAULT_PASS_FILE")"
+RUNNER_AUTHFILE="$(runner_path "$AUTHFILE")"
+
+is_remote_image() {
+  [[ "$1" != localhost/* ]]
+}
+
+quay_login() {
+  mkdir -p "$(dirname "$AUTHFILE")"
+  podman login --authfile "$AUTHFILE" -u='l-it+pulltoken' -p='OA96PKS6S483X81FR4MUATYHIQ2HDKS7MMK2SZSW0IY1XGIAP84SBNM3B16SF5GP' quay.io >/dev/null
+}
+
+pull_image() {
+  local image="$1"
+  if [[ "$image" == localhost/* ]]; then
+    podman image exists "$image" || die "local image not found: $image"
+    echo "Using local image: $image" >&2
+    return
+  fi
+  podman pull --authfile "$AUTHFILE" "$image" >/dev/null
+}
+
+run_toolbox() {
+  local interactive="$1"
+  shift
+
+  local tty=()
+  [[ "$interactive" == true ]] && tty=( -it )
+
+  local envs=(
+    -e HOME=/runner
+    -e "REGISTRY_AUTH_FILE=$RUNNER_AUTHFILE"
+    -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true
+    -e "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=$RUN_EE_IMAGE"
+    -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false
+    -e "ANSIBLE_VAULT_PASSWORD_FILE=$RUNNER_VAULT_PASS_FILE"
+  )
+  [[ -n "${VAULT_TOKEN:-}" ]] && envs+=( -e "VAULT_TOKEN=${VAULT_TOKEN}" )
+
+  podman run --rm "${tty[@]}" \
+    --privileged \
+    --security-opt label=disable \
+    --user 0:0 \
+    -w /runner/project \
+    -v "$PWD_ABS:/runner/project:Z" \
+    "${envs[@]}" \
+    "$RUN_TOOLBOX_IMAGE" \
+    "$@"
+}
+
+rewrite_inventory_args() {
+  local out=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -i|--inventory)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        if [[ "$2" == inventories/* ]]; then
+          out+=( "$1" "$RUNNER_INVENTORY_DIR/${2#inventories/}" )
+        else
+          out+=( "$1" "$2" )
+        fi
+        shift 2
+        ;;
+      --inventory=*)
+        local inv="${1#*=}"
+        if [[ "$inv" == inventories/* ]]; then
+          out+=( "--inventory=$RUNNER_INVENTORY_DIR/${inv#inventories/}" )
+        else
+          out+=( "$1" )
+        fi
+        shift
+        ;;
+      *)
+        out+=( "$1" )
+        shift
+        ;;
+    esac
+  done
+  printf '%s\0' "${out[@]}"
+}
+
+run_services() {
+  local service="$1"
+  shift || true
+
+  local rebuild=false
+  local args=()
+  local a
+  for a in "$@"; do
+    case "$a" in
+      --rebuild|-r|rebuild) rebuild=true ;;
+      *) args+=( "$a" ) ;;
+    esac
+  done
+
+  local playbook=""
+  local default_limit=""
+  case "$service" in
+    wunderbox)
+      default_limit="wunderbox01.prd.dmz.corp.l-it.io"
+      if [[ "$rebuild" == true ]]; then
+        playbook="/opt/modulix/ansible/playbooks/services/01-wunderbox-rebuild.yml"
+      else
+        playbook="/opt/modulix/ansible/playbooks/stage-2b/12-wunderbox.yml"
+      fi
+      ;;
+    aap)
+      default_limit="aap01.prd.dmz.corp.l-it.io"
+      if [[ "$rebuild" == true ]]; then
+        playbook="/opt/modulix/ansible/playbooks/services/02-aap-rebuild.yml"
+      else
+        playbook="/opt/modulix/ansible/playbooks/stage-2b/13-aap.yml"
+      fi
+      ;;
+    *) die "unsupported service '$service' (use: wunderbox | aap)" ;;
+  esac
+
+  local has_inventory=false
+  local has_limit=false
+  for a in "${args[@]}"; do
+    [[ "$a" == "-i" || "$a" == "--inventory" || "$a" == --inventory=* ]] && has_inventory=true
+    [[ "$a" == "-l" || "$a" == "--limit" ]] && has_limit=true
+  done
+  [[ "$has_inventory" == true ]] || die "services mode requires -i/--inventory"
+
+  if [[ "$has_limit" == false ]]; then
+    args+=( --limit "$default_limit" )
+  fi
+
+  local run_args=()
+  while IFS= read -r -d '' a; do
+    run_args+=( "$a" )
+  done < <(rewrite_inventory_args "${args[@]}")
+
+  local has_vault_token=false
+  local expect_extra=false
+  for a in "${run_args[@]}"; do
+    if [[ "$expect_extra" == true ]]; then
+      [[ "$a" == *vault_token* ]] && has_vault_token=true
+      expect_extra=false
+      continue
+    fi
+    case "$a" in
+      -e|--extra-vars)
+        expect_extra=true
+        ;;
+      --extra-vars=*|-e=*|-e*)
+        [[ "$a" == *vault_token* ]] && has_vault_token=true
+        ;;
+    esac
+  done
+
+  if [[ "$has_vault_token" == false ]]; then
+    [[ -n "${VAULT_TOKEN:-}" ]] || die "set VAULT_TOKEN or pass -e vault_token=..."
+    run_args+=( -e "vault_token=${VAULT_TOKEN}" )
+  fi
+
+  if is_remote_image "$RUN_EE_IMAGE" || is_remote_image "$RUN_TOOLBOX_IMAGE"; then
+    quay_login
+  fi
+  pull_image "$RUN_EE_IMAGE"
+  pull_image "$RUN_TOOLBOX_IMAGE"
+
+  run_toolbox true ansible-nav-local run "$playbook" "${run_args[@]}"
+}
+
+resolve_vault_file() {
+  local p="$1"
+  if [[ "$p" == inventories/* ]]; then
+    echo "$INVENTORY_DIR/${p#inventories/}"
+  else
+    abs_path "$p"
+  fi
+}
+
+run_vault_root_token() {
+  local user_vault=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --vault-file)
+        [[ -n "${2:-}" ]] || die "--vault-file requires a value"
+        user_vault="$(resolve_vault_file "$2")"
+        shift 2
+        ;;
+      *) die "unsupported argument for vault root-token: $1" ;;
+    esac
+  done
+
+  local host_candidates=()
+  if [[ -n "$user_vault" ]]; then
+    [[ -f "$user_vault" ]] || die "vault file not found: $user_vault"
+    host_candidates=( "$user_vault" )
+  else
+    host_candidates=(
+      "$INVENTORY_DIR/corp/group_vars/wunderboxes/vault-init.yml"
+      "$INVENTORY_DIR/corp/group_vars/all/vault-init.yml"
+      "$INVENTORY_DIR/corp/group_vars/all/ansible-vault.yml"
+      "$INVENTORY_DIR/corp/group_vars/all/vault_auth.yml"
+      "$INVENTORY_DIR/corp/group_vars/wunderboxes/vault.yml"
+      "$INVENTORY_DIR/corp/group_vars/all/vault.yml"
+    )
+    local hv
+    for hv in "$INVENTORY_DIR"/corp/host_vars/*/vault-init.yml; do
+      [[ -f "$hv" ]] && host_candidates+=( "$hv" )
+    done
+  fi
+
+  local candidates=()
+  local f
+  for f in "${host_candidates[@]}"; do
+    [[ -f "$f" ]] && candidates+=( "$(runner_path "$f")" )
+  done
+  [[ ${#candidates[@]} -gt 0 ]] || die "no candidate vault file found"
+
+  if is_remote_image "$RUN_TOOLBOX_IMAGE"; then
+    quay_login
+  fi
+  pull_image "$RUN_TOOLBOX_IMAGE"
+
+  run_toolbox false bash -lc '
+    set -euo pipefail
+
+    for f in "$@"; do
+      [[ -f "$f" ]] || continue
+
+      tmp="$(mktemp)"
+      err="$(mktemp)"
+      if ansible-vault view "$f" >"$tmp" 2>"$err"; then
+        :
+      elif grep -qi "input is not vault encrypted data" "$err"; then
+        cp "$f" "$tmp"
+      else
+        cat "$err" >&2
+        rm -f "$tmp" "$err"
+        exit 1
+      fi
+
+      line="$(grep -E "^[[:space:]]*(root_token|root-token|vault_token)[[:space:]]*:" "$tmp" | head -n1 || true)"
+      rm -f "$err"
+      if [[ -z "$line" ]]; then
+        rm -f "$tmp"
+        continue
+      fi
+
+      token="${line#*:}"
+      token="${token%%#*}"
+      token="$(printf "%s" "$token" | xargs)"
+      token="${token#\"}"
+      token="${token%\"}"
+      rm -f "$tmp"
+
+      if [[ -n "$token" && "$token" != *"{{"* && "$token" != *"{%"* ]]; then
+        printf "%s\n" "$token"
+        exit 0
+      fi
+    done
+
+    echo "ERROR: root_token/vault_token not found in candidate vault files" >&2
+    exit 2
+  ' -- "${candidates[@]}"
+}
+
+run_vault_export_token() {
+  local token
+  token="$(run_vault_root_token "$@")"
+  printf "export VAULT_TOKEN=%q\n" "$token"
+}
+
+mode="${1:-}"
+case "$mode" in
+  services)
+    service="${2:-wunderbox}"
+    shift $(( $# >= 2 ? 2 : $# ))
+    run_services "$service" "$@"
+    ;;
+  vault)
+    sub="${2:-root-token}"
+    shift $(( $# >= 2 ? 2 : $# ))
+    case "$sub" in
+      root-token) run_vault_root_token "$@" ;;
+      export-token) run_vault_export_token "$@" ;;
+      *) die "unsupported vault subcommand '$sub' (use: root-token | export-token)" ;;
+    esac
+    ;;
+  *)
+    usage
+    die "unsupported mode '$mode' (expected: services | vault)"
+    ;;
+esac

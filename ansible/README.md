@@ -277,6 +277,11 @@ Wrapper behavior (`scripts/ansible-nav`):
 - Inventory is environment-specific and is not provided as a universal ModuLix baseline.
 - Platform teams must define inventory to match their infrastructure and operating context
   (host/group model, network zones, access paths, and required runtime inputs).
+- `lit.supplementary.aap` is backend-agnostic and expects resolved password inputs
+  (`aap_*_admin_password_input`).
+- `playbooks/stage-2b/13-aap.yml` provides an optional Vault pre-step
+  (`tasks/aap_seed_passwords_vault.yml`) to read/create admin passwords and publish
+  resolved inputs before the AAP roles run.
 
 ## Security
 
