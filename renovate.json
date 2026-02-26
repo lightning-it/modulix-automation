@@ -6,26 +6,16 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track default toolbox image version references in release-coupled docs",
+      "description": "Track default toolbox image references in docs and runtime scripts",
       "managerFilePatterns": [
         "/^docs\\/runtime-contract\\.md$/",
-        "/^docs\\/support-matrix\\.md$/"
+        "/^docs\\/support-matrix\\.md$/",
+        "/^ansible\\/scripts\\/ansible-nav$/",
+        "/^ansible\\/README\\.md$/",
+        "/^scripts\\/modulix\\/run-modulix\\.sh$/"
       ],
       "matchStrings": [
-        "quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\\s`]+)"
-      ],
-      "depNameTemplate": "quay.io/l-it/ee-wunder-toolbox-ubi9",
-      "datasourceTemplate": "docker",
-      "versioningTemplate": "docker"
-    },
-    {
-      "customType": "regex",
-      "description": "Track ansible-nav default toolbox image",
-      "managerFilePatterns": [
-        "/^ansible\\/scripts\\/ansible-nav$/"
-      ],
-      "matchStrings": [
-        "image=\"\\$\\{ANSIBLE_TOOLBOX_IMAGE:-quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\"}]+)\\}\""
+        "quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\\s`\\\"\\)\\}]+)"
       ],
       "depNameTemplate": "quay.io/l-it/ee-wunder-toolbox-ubi9",
       "datasourceTemplate": "docker",
