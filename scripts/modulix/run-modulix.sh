@@ -72,14 +72,35 @@ esac
 RUNNER_INVENTORY_DIR="$(runner_path "$INVENTORY_DIR")"
 RUNNER_VAULT_PASS_FILE="$(runner_path "$VAULT_PASS_FILE")"
 RUNNER_AUTHFILE="$(runner_path "$AUTHFILE")"
+SSH_AUTH_SOCK_HOST=""
 
 is_remote_image() {
   [[ "$1" != localhost/* ]]
 }
 
-quay_login() {
-  mkdir -p "$(dirname "$AUTHFILE")"
-  podman login --authfile "$AUTHFILE" -u='l-it+pulltoken' -p='OA96PKS6S483X81FR4MUATYHIQ2HDKS7MMK2SZSW0IY1XGIAP84SBNM3B16SF5GP' quay.io >/dev/null
+ensure_authfile_for_remote() {
+  local image="$1"
+  if is_remote_image "$image"; then
+    [[ -f "$AUTHFILE" && -s "$AUTHFILE" ]] || die "remote image requires authfile: $AUTHFILE (run: podman login --authfile \"$AUTHFILE\" quay.io)"
+  fi
+}
+
+require_ssh_agent() {
+  local candidate=""
+  [[ -n "${SSH_AUTH_SOCK:-}" ]] || die "SSH_AUTH_SOCK is not set. Start ssh-agent and load key(s) with ssh-add."
+
+  candidate="$(readlink -f -- "$SSH_AUTH_SOCK" 2>/dev/null || true)"
+  if [[ -n "$candidate" && -S "$candidate" ]]; then
+    SSH_AUTH_SOCK_HOST="$candidate"
+    return
+  fi
+
+  if [[ -S "$SSH_AUTH_SOCK" ]]; then
+    SSH_AUTH_SOCK_HOST="$SSH_AUTH_SOCK"
+    return
+  fi
+
+  die "SSH_AUTH_SOCK is not a valid socket: $SSH_AUTH_SOCK"
 }
 
 pull_image() {
@@ -100,7 +121,7 @@ run_toolbox() {
   [[ "$interactive" == true ]] && tty=( -it )
 
   local envs=(
-    -e HOME=/runner
+    -e HOME=/runner/project
     -e "REGISTRY_AUTH_FILE=$RUNNER_AUTHFILE"
     -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true
     -e "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=$RUN_EE_IMAGE"
@@ -108,6 +129,11 @@ run_toolbox() {
     -e "ANSIBLE_VAULT_PASSWORD_FILE=$RUNNER_VAULT_PASS_FILE"
   )
   [[ -n "${VAULT_TOKEN:-}" ]] && envs+=( -e "VAULT_TOKEN=${VAULT_TOKEN}" )
+  local socket_mount=()
+  if [[ -n "$SSH_AUTH_SOCK_HOST" ]]; then
+    envs+=( -e "SSH_AUTH_SOCK=$SSH_AUTH_SOCK_HOST" )
+    socket_mount+=( -v "$SSH_AUTH_SOCK_HOST:$SSH_AUTH_SOCK_HOST" )
+  fi
 
   podman run --rm "${tty[@]}" \
     --privileged \
@@ -115,6 +141,7 @@ run_toolbox() {
     --user 0:0 \
     -w /runner/project \
     -v "$PWD_ABS:/runner/project:Z" \
+    "${socket_mount[@]}" \
     "${envs[@]}" \
     "$RUN_TOOLBOX_IMAGE" \
     "$@"
@@ -154,6 +181,8 @@ rewrite_inventory_args() {
 run_services() {
   local service="$1"
   shift || true
+
+  require_ssh_agent
 
   local rebuild=false
   local args=()
@@ -227,9 +256,8 @@ run_services() {
     run_args+=( -e "vault_token=${VAULT_TOKEN}" )
   fi
 
-  if is_remote_image "$RUN_EE_IMAGE" || is_remote_image "$RUN_TOOLBOX_IMAGE"; then
-    quay_login
-  fi
+  ensure_authfile_for_remote "$RUN_EE_IMAGE"
+  ensure_authfile_for_remote "$RUN_TOOLBOX_IMAGE"
   pull_image "$RUN_EE_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
 
@@ -284,9 +312,7 @@ run_vault_root_token() {
   done
   [[ ${#candidates[@]} -gt 0 ]] || die "no candidate vault file found"
 
-  if is_remote_image "$RUN_TOOLBOX_IMAGE"; then
-    quay_login
-  fi
+  ensure_authfile_for_remote "$RUN_TOOLBOX_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
 
   run_toolbox false bash -lc '
