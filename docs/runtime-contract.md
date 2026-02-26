@@ -12,7 +12,7 @@ This document defines the canonical execution contract for ModuLix automation re
 ## Default runtime behavior
 
 - Runs inside toolbox container image:
-  - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.6`
+  - default `ANSIBLE_TOOLBOX_IMAGE=quay.io/l-it/ee-wunder-toolbox-ubi9:v1.6.0`
 - `ansible-navigator run` is always executed with `--ee true`.
 - Collections are resolved from `ANSIBLE_COLLECTIONS_PATH` with local project overlays first.
 - `ansible/scripts/ansible-nav-local run` bootstraps collections by default
