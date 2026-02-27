@@ -33,7 +33,21 @@ rm -rf %{buildroot}
 
 install -d %{buildroot}/opt/modulix
 cp -a scripts %{buildroot}/opt/modulix/
+# Ship full Ansible runtime payload under /opt/modulix/ansible.
 cp -a ansible %{buildroot}/opt/modulix/
+
+# Build-time sanity checks: fail packaging early if expected playbooks are missing.
+test -d %{buildroot}/opt/modulix/ansible/playbooks
+for pb in \
+  services/01-wunderbox-rebuild.yml \
+  services/10-wunderbox-vmware-provision.yml \
+  services/11-wunderbox-os-base.yml \
+  services/12-wunderbox-service-stack.yml \
+  stage-2b/12-wunderbox.yml \
+  stage-2b/13-aap.yml \
+; do
+  test -f "%{buildroot}/opt/modulix/ansible/playbooks/${pb}"
+done
 
 # Remove local-only runtime artifacts from packaged payload.
 rm -rf %{buildroot}/opt/modulix/ansible/.toolbox-podman
