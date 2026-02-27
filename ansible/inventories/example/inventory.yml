@@ -1,5 +1,24 @@
 ---
 all:
+  vars:
+    services:
+      wunderbox:
+        repos: enabled
+        firewall: enabled
+        coredns: enabled
+        dhcp: enabled
+        nginx_deploy: enabled
+        vault_deploy: enabled
+        vault_bootstrap: enabled
+        vault_validate: enabled
+        vault_ops: enabled
+        vault_config: enabled
+        minio_deploy: enabled
+        minio_config: enabled
+        minio_bootstrap: enabled
+        nexus_deploy: enabled
+        nginx_config: enabled
+        nexus_config: enabled
   hosts:
     localhost:
       ansible_connection: local

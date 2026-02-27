@@ -45,6 +45,26 @@
   hosts: wunderboxes
   become: true
   gather_facts: true
+  vars:
+    # Service toggles can be set in inventory either as:
+    # 1) services.wunderbox.<name>: enabled|disabled
+    # 2) wunderbox_service_<name>: enabled|disabled
+    # Missing values default to disabled.
+    _wunderbox_services_cfg: >-
+      {{
+        (
+          services.wunderbox
+          if (
+            services is defined and
+            services is mapping and
+            services.wunderbox is defined and
+            services.wunderbox is mapping
+          )
+          else
+          (wunderbox_services | default({}))
+        )
+      }}
+    _enabled_values: ['enabled', 'true', 'yes', 'on', '1', 'y']
 
   tasks:
     - name: Enable required repos
@@ -52,15 +72,27 @@
         name: lit.rhel.repos
         apply:
           tags: [repos]
+      when: >-
+        (
+          wunderbox_service_repos
+          | default(_wunderbox_services_cfg.repos | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [repos]
 
-    # Firewall System Role: only run if "firewall" var is provided (to avoid accidental resets)
+    # Firewall System Role: run only when service toggle is enabled.
     - name: Apply firewall policy
       ansible.builtin.include_role:
         name: fedora.linux_system_roles.firewall
         apply:
           tags: [firewall]
-      when: (firewall | default([], true) | length) > 0
+      when:
+        - >-
+          (
+            wunderbox_service_firewall
+            | default(_wunderbox_services_cfg.firewall | default('disabled'))
+            | string | lower
+          ) in _enabled_values
       tags: [firewall]
 
     # CoreDNS (service) - internal DNS provider
@@ -69,6 +101,12 @@
         name: lit.supplementary.coredns_deploy
         apply:
           tags: [dns, coredns, coredns_deploy]
+      when: >-
+        (
+          wunderbox_service_coredns
+          | default(_wunderbox_services_cfg.coredns | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [dns, coredns, coredns_deploy]
 
     # DHCP (service) - internal DHCP provider (system service, not container)
@@ -78,6 +116,12 @@
         name: lit.supplementary.dhcp_deploy
         apply:
           tags: [dhcp, dhcp_deploy]
+      when: >-
+        (
+          wunderbox_service_dhcp
+          | default(_wunderbox_services_cfg.dhcp | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [dhcp, dhcp_deploy]
 
     # NGINX (service)
@@ -86,6 +130,12 @@
         name: lit.supplementary.nginx_deploy
         apply:
           tags: [nginx, nginx_deploy]
+      when: >-
+        (
+          wunderbox_service_nginx_deploy
+          | default(_wunderbox_services_cfg.nginx_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [nginx, nginx_deploy]
 
     # HashiCorp Vault (service)
@@ -94,6 +144,12 @@
         name: lit.supplementary.vault_deploy
         apply:
           tags: [vault, vault_deploy]
+      when: >-
+        (
+          wunderbox_service_vault_deploy
+          | default(_wunderbox_services_cfg.vault_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [vault, vault_deploy]
 
     - name: Bootstrap Vault
@@ -101,6 +157,12 @@
         name: lit.supplementary.vault_bootstrap
         apply:
           tags: [vault, vault_bootstrap]
+      when: >-
+        (
+          wunderbox_service_vault_bootstrap
+          | default(_wunderbox_services_cfg.vault_bootstrap | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [vault, vault_bootstrap]
 
     - name: Validate Vault
@@ -108,6 +170,12 @@
         name: lit.supplementary.vault_validate
         apply:
           tags: [vault, vault_validate]
+      when: >-
+        (
+          wunderbox_service_vault_validate
+          | default(_wunderbox_services_cfg.vault_validate | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [vault, vault_validate]
 
     # Vault day-2 operations (default action is none; enables `-t vault_ops -e vault_ops_action=...`)
@@ -116,6 +184,12 @@
         name: lit.supplementary.vault_ops
         apply:
           tags: [vault, vault_ops]
+      when: >-
+        (
+          wunderbox_service_vault_ops
+          | default(_wunderbox_services_cfg.vault_ops | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [vault, vault_ops]
 
     # Terraform-based Vault content ("vault-content apply")
@@ -125,6 +199,12 @@
         name: lit.supplementary.vault_config
         apply:
           tags: [vault, vault_config]
+      when: >-
+        (
+          wunderbox_service_vault_config
+          | default(_wunderbox_services_cfg.vault_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [vault, vault_config]
 
     # MinIO (service)
@@ -133,6 +213,12 @@
         name: lit.supplementary.minio_deploy
         apply:
           tags: [minio, minio_deploy]
+      when: >-
+        (
+          wunderbox_service_minio_deploy
+          | default(_wunderbox_services_cfg.minio_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [minio, minio_deploy]
 
     - name: Configure MinIO
@@ -140,6 +226,12 @@
         name: lit.supplementary.minio_config
         apply:
           tags: [minio, minio_config]
+      when: >-
+        (
+          wunderbox_service_minio_config
+          | default(_wunderbox_services_cfg.minio_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [minio, minio_config]
 
     - name: Bootstrap MinIO
@@ -147,6 +239,12 @@
         name: lit.supplementary.minio_bootstrap
         apply:
           tags: [minio, minio_bootstrap]
+      when: >-
+        (
+          wunderbox_service_minio_bootstrap
+          | default(_wunderbox_services_cfg.minio_bootstrap | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [minio, minio_bootstrap]
 
     # Sonatype Nexus Repository Manager (service)
@@ -157,6 +255,12 @@
           tags: [nexus]
       vars:
         nexus_skip_initial_config: true
+      when: >-
+        (
+          wunderbox_service_nexus_deploy
+          | default(_wunderbox_services_cfg.nexus_deploy | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [nexus]
 
     # Configure NGINX only after core backends (Vault/MinIO/Nexus) exist.
@@ -166,6 +270,12 @@
         name: lit.supplementary.nginx_config
         apply:
           tags: [nginx, nginx_config]
+      when: >-
+        (
+          wunderbox_service_nginx_config
+          | default(_wunderbox_services_cfg.nginx_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [nginx, nginx_config]
 
     - name: Configure Nexus API
@@ -174,4 +284,10 @@
         tasks_from: initial_config
         apply:
           tags: [nexus, sonatype_nexus_config]
+      when: >-
+        (
+          wunderbox_service_nexus_config
+          | default(_wunderbox_services_cfg.nexus_config | default('disabled'))
+          | string | lower
+        ) in _enabled_values
       tags: [nexus, sonatype_nexus_config]
