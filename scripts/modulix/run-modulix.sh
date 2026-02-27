@@ -139,26 +139,6 @@ pull_image() {
   podman pull "${pull_args[@]}" "$image" >/dev/null
 }
 
-load_run_ee_into_toolbox_from_host() {
-  local image="$1"
-  local cache_dir="$PWD_ABS/.run-modulix-cache"
-  local archive=""
-  local runner_archive=""
-  echo "Syncing run EE image from host store into toolbox: $image" >&2
-  mkdir -p -- "$cache_dir"
-  archive="$(mktemp "$cache_dir/run-ee-image.XXXXXX.tar")"
-  runner_archive="$(runner_path "$archive")"
-  if ! podman save -o "$archive" "$image" >/dev/null; then
-    rm -f -- "$archive"
-    return 1
-  fi
-  if ! run_toolbox false podman load -i "$runner_archive" >/dev/null; then
-    rm -f -- "$archive"
-    return 1
-  fi
-  rm -f -- "$archive"
-}
-
 run_toolbox() {
   local interactive="$1"
   shift
@@ -313,8 +293,35 @@ run_services() {
   ensure_authfile_for_remote "$RUN_TOOLBOX_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
   if [[ "$RUN_USE_HOST_EE_IMAGE" == "true" ]]; then
+    local ee_archive=""
+    local runner_ee_archive=""
+    local cache_dir="$PWD_ABS/.run-modulix-cache"
+
     pull_image "$RUN_EE_IMAGE"
-    load_run_ee_into_toolbox_from_host "$RUN_EE_IMAGE"
+    echo "Syncing run EE image from host store into toolbox: $RUN_EE_IMAGE" >&2
+
+    mkdir -p -- "$cache_dir"
+    ee_archive="$(mktemp "$cache_dir/run-ee-image.XXXXXX.tar")"
+    runner_ee_archive="$(runner_path "$ee_archive")"
+
+    if ! podman save -o "$ee_archive" "$RUN_EE_IMAGE" >/dev/null; then
+      rm -f -- "$ee_archive"
+      die "failed to export run EE image from host store: $RUN_EE_IMAGE"
+    fi
+
+    if ! run_toolbox true bash -lc '
+      set -euo pipefail
+      ee_archive="$1"
+      shift
+      podman load -i "$ee_archive" >/dev/null
+      exec ansible-nav-local run "$@"
+    ' -- "$runner_ee_archive" "$playbook" "${run_args[@]}"; then
+      rm -f -- "$ee_archive"
+      return 1
+    fi
+
+    rm -f -- "$ee_archive"
+    return 0
   fi
 
   run_toolbox true ansible-nav-local run "$playbook" "${run_args[@]}"
