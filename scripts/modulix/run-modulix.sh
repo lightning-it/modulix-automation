@@ -52,7 +52,7 @@ esac
 [[ -d "$INVENTORY_DIR" ]] || die "--inventory is not a directory: $INVENTORY_DIR"
 
 RUN_EE_IMAGE="${RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9-certified:v1.11.6}"
-RUN_TOOLBOX_IMAGE="${RUN_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.6.0}"
+RUN_TOOLBOX_IMAGE="${RUN_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.7.0}"
 VAULT_PASS_FILE="$(abs_path "${VAULT_PASS_FILE:-$PWD_ABS/.vault-pass.txt}")"
 AUTHFILE="$(abs_path "${AUTHFILE:-$PWD_ABS/.podman-auth.json}")"
 RUN_USE_HOST_EE_IMAGE="${RUN_USE_HOST_EE_IMAGE:-true}"
