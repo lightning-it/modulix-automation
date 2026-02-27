@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  run-modulix.sh --inventory <PATH> services <wunderbox|aap> [--rebuild] [ansible args...]
+  run-modulix.sh --inventory <PATH> services <wunderbox|aap> [--rebuild] [--playbook <PATH>] [ansible args...]
   run-modulix.sh --inventory <PATH> vault root-token [--vault-file <PATH>]
   run-modulix.sh --inventory <PATH> vault export-token [--vault-file <PATH>]
 USAGE
@@ -218,14 +218,27 @@ run_services() {
   require_ssh_agent
 
   local rebuild=false
+  local playbook_override=""
+  local expect_playbook=false
   local args=()
   local a
   for a in "$@"; do
+    if [[ "$expect_playbook" == true ]]; then
+      playbook_override="$a"
+      expect_playbook=false
+      continue
+    fi
     case "$a" in
       --rebuild|-r|rebuild) rebuild=true ;;
+      --playbook|-p) expect_playbook=true ;;
+      --playbook=*|-p=*)
+        playbook_override="${a#*=}"
+        [[ -n "$playbook_override" ]] || die "--playbook requires a non-empty value"
+        ;;
       *) args+=( "$a" ) ;;
     esac
   done
+  [[ "$expect_playbook" == false ]] || die "--playbook requires a value"
 
   local playbook=""
   local default_limit=""
@@ -248,6 +261,16 @@ run_services() {
       ;;
     *) die "unsupported service '$service' (use: wunderbox | aap)" ;;
   esac
+
+  if [[ -n "$playbook_override" ]]; then
+    case "$playbook_override" in
+      /*) playbook="$playbook_override" ;;
+      playbooks/*) playbook="/opt/modulix/ansible/$playbook_override" ;;
+      ansible/playbooks/*) playbook="/runner/project/$playbook_override" ;;
+      *.yml|*.yaml) playbook="/opt/modulix/ansible/playbooks/$playbook_override" ;;
+      *) die "invalid --playbook path '$playbook_override' (use absolute path, playbooks/..., ansible/playbooks/..., or <subpath>.yml)" ;;
+    esac
+  fi
 
   local has_inventory=false
   local has_limit=false

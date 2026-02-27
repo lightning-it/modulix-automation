@@ -79,3 +79,17 @@ export VAULT_TOKEN="$(
 ./run-modulix.sh --inventory "$INVENTORY_DIR" services aap --rebuild \
   -i inventories/corp/inventory.yml --limit <HOST>
 ```
+
+Run a specific playbook in `services` mode:
+
+```bash
+./run-modulix.sh --inventory "$INVENTORY_DIR" services wunderbox \
+  --playbook playbooks/services/12-wunderbox-service-stack.yml \
+  -i inventories/corp/inventory.yml --limit <HOST>
+```
+
+Supported `--playbook` forms:
+- absolute path (for example `/opt/modulix/ansible/playbooks/services/12-wunderbox-service-stack.yml`)
+- `playbooks/...` (resolved to `/opt/modulix/ansible/playbooks/...`)
+- `ansible/playbooks/...` (resolved to `/runner/project/ansible/playbooks/...`)
+- `<subpath>.yml` (resolved to `/opt/modulix/ansible/playbooks/<subpath>.yml`)
