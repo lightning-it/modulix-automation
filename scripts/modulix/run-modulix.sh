@@ -55,6 +55,24 @@ RUN_EE_IMAGE="${RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9-certified:v1.1
 RUN_TOOLBOX_IMAGE="${RUN_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.6.0}"
 VAULT_PASS_FILE="$(abs_path "${VAULT_PASS_FILE:-$PWD_ABS/.vault-pass.txt}")"
 AUTHFILE="$(abs_path "${AUTHFILE:-$PWD_ABS/.podman-auth.json}")"
+RUN_USE_HOST_EE_IMAGE="${RUN_USE_HOST_EE_IMAGE:-true}"
+RUN_SKIP_AUTH="${RUN_SKIP_AUTH:-false}"
+RUN_SKIP_CERT_CHECK="${RUN_SKIP_CERT_CHECK:-false}"
+
+case "$RUN_USE_HOST_EE_IMAGE" in
+  true|false) ;;
+  *) die "RUN_USE_HOST_EE_IMAGE must be true or false (got: $RUN_USE_HOST_EE_IMAGE)" ;;
+esac
+
+case "$RUN_SKIP_AUTH" in
+  true|false) ;;
+  *) die "RUN_SKIP_AUTH must be true or false (got: $RUN_SKIP_AUTH)" ;;
+esac
+
+case "$RUN_SKIP_CERT_CHECK" in
+  true|false) ;;
+  *) die "RUN_SKIP_CERT_CHECK must be true or false (got: $RUN_SKIP_CERT_CHECK)" ;;
+esac
 
 case "$VAULT_PASS_FILE" in
   "$PWD_ABS"|"$PWD_ABS"/*) ;;
@@ -80,8 +98,9 @@ is_remote_image() {
 
 ensure_authfile_for_remote() {
   local image="$1"
+  [[ "$RUN_SKIP_AUTH" == "true" ]] && return
   if is_remote_image "$image"; then
-    [[ -f "$AUTHFILE" && -s "$AUTHFILE" ]] || die "remote image requires authfile: $AUTHFILE (run: podman login --authfile \"$AUTHFILE\" quay.io)"
+    [[ -f "$AUTHFILE" && -s "$AUTHFILE" ]] || die "remote image requires authfile: $AUTHFILE (run: podman login --authfile \"$AUTHFILE\" quay.io or set RUN_SKIP_AUTH=true)"
   fi
 }
 
@@ -105,12 +124,19 @@ require_ssh_agent() {
 
 pull_image() {
   local image="$1"
+  local pull_args=()
   if [[ "$image" == localhost/* ]]; then
     podman image exists "$image" || die "local image not found: $image"
     echo "Using local image: $image" >&2
     return
   fi
-  podman pull --authfile "$AUTHFILE" "$image" >/dev/null
+  if [[ "$RUN_SKIP_AUTH" != "true" ]]; then
+    pull_args+=( --authfile "$AUTHFILE" )
+  fi
+  if [[ "$RUN_SKIP_CERT_CHECK" == "true" ]]; then
+    pull_args+=( --tls-verify=false )
+  fi
+  podman pull "${pull_args[@]}" "$image" >/dev/null
 }
 
 run_toolbox() {
@@ -122,12 +148,19 @@ run_toolbox() {
 
   local envs=(
     -e HOME=/runner/project
-    -e "REGISTRY_AUTH_FILE=$RUNNER_AUTHFILE"
     -e ANSIBLE_TOOLBOX_NAV_EE_ENABLED=true
     -e "ANSIBLE_TOOLBOX_NAV_EE_IMAGE=$RUN_EE_IMAGE"
+    -e "ANSIBLE_TOOLBOX_NAV_SKIP_AUTH=$RUN_SKIP_AUTH"
+    -e "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=$RUN_SKIP_CERT_CHECK"
     -e ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=false
     -e "ANSIBLE_VAULT_PASSWORD_FILE=$RUNNER_VAULT_PASS_FILE"
   )
+  if [[ "$RUN_SKIP_AUTH" != "true" ]]; then
+    envs+=( -e "REGISTRY_AUTH_FILE=$RUNNER_AUTHFILE" )
+  fi
+  if [[ "$RUN_USE_HOST_EE_IMAGE" == "true" ]]; then
+    envs+=( -e ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never )
+  fi
   [[ -n "${VAULT_TOKEN:-}" ]] && envs+=( -e "VAULT_TOKEN=${VAULT_TOKEN}" )
   local socket_mount=()
   if [[ -n "$SSH_AUTH_SOCK_HOST" ]]; then
@@ -258,8 +291,38 @@ run_services() {
 
   ensure_authfile_for_remote "$RUN_EE_IMAGE"
   ensure_authfile_for_remote "$RUN_TOOLBOX_IMAGE"
-  pull_image "$RUN_EE_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
+  if [[ "$RUN_USE_HOST_EE_IMAGE" == "true" ]]; then
+    local ee_archive=""
+    local runner_ee_archive=""
+    local cache_dir="$PWD_ABS/.run-modulix-cache"
+
+    pull_image "$RUN_EE_IMAGE"
+    echo "Syncing run EE image from host store into toolbox: $RUN_EE_IMAGE" >&2
+
+    mkdir -p -- "$cache_dir"
+    ee_archive="$(mktemp "$cache_dir/run-ee-image.XXXXXX.tar")"
+    runner_ee_archive="$(runner_path "$ee_archive")"
+
+    if ! podman save -o "$ee_archive" "$RUN_EE_IMAGE" >/dev/null; then
+      rm -f -- "$ee_archive"
+      die "failed to export run EE image from host store: $RUN_EE_IMAGE"
+    fi
+
+    if ! run_toolbox true bash -lc '
+      set -euo pipefail
+      ee_archive="$1"
+      shift
+      podman load -i "$ee_archive" >/dev/null
+      exec ansible-nav-local run "$@"
+    ' -- "$runner_ee_archive" "$playbook" "${run_args[@]}"; then
+      rm -f -- "$ee_archive"
+      return 1
+    fi
+
+    rm -f -- "$ee_archive"
+    return 0
+  fi
 
   run_toolbox true ansible-nav-local run "$playbook" "${run_args[@]}"
 }

@@ -9,6 +9,8 @@ nav_ee_enabled="${ANSIBLE_TOOLBOX_NAV_EE_ENABLED:-false}"
 nav_container_engine="${ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE:-podman}"
 nav_ee_image="${ANSIBLE_TOOLBOX_NAV_EE_IMAGE:-}"
 nav_pull_policy="${ANSIBLE_TOOLBOX_NAV_PULL_POLICY:-}"
+nav_skip_auth="${ANSIBLE_TOOLBOX_NAV_SKIP_AUTH:-false}"
+nav_skip_cert_check="${ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK:-false}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS+x}" ]]; then
@@ -39,6 +41,8 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_CONTAINER_ENGINE=podman      (default: podman)
   ANSIBLE_TOOLBOX_NAV_EE_IMAGE=<image:tag>         (default: ansible-navigator config/env)
   ANSIBLE_TOOLBOX_NAV_PULL_POLICY=always|missing|never|tag (default: ansible-navigator config/env)
+  ANSIBLE_TOOLBOX_NAV_SKIP_AUTH=true|false         (default: false)
+  ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true|false   (default: false)
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
   ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
@@ -61,6 +65,22 @@ case "${nav_ee_enabled}" in
   true|false) ;;
   *)
     echo "Invalid ANSIBLE_TOOLBOX_NAV_EE_ENABLED='${nav_ee_enabled}' (use: true|false)." >&2
+    exit 1
+    ;;
+esac
+
+case "${nav_skip_auth}" in
+  true|false) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_SKIP_AUTH='${nav_skip_auth}' (use: true|false)." >&2
+    exit 1
+    ;;
+esac
+
+case "${nav_skip_cert_check}" in
+  true|false) ;;
+  *)
+    echo "Invalid ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK='${nav_skip_cert_check}' (use: true|false)." >&2
     exit 1
     ;;
 esac
@@ -89,6 +109,10 @@ if [[ -n "${nav_pull_policy}" ]]; then
       exit 1
       ;;
   esac
+fi
+
+if [[ "${nav_skip_auth}" == "true" ]]; then
+  unset REGISTRY_AUTH_FILE
 fi
 
 hash_file() {
@@ -267,6 +291,20 @@ case "${subcommand}" in
       "${effective_collections_requirements}" \
       "${collections_install_path}" \
       "${collections_stamp_file}"
+    if [[ "${nav_pull_policy}" != "never" && "${nav_skip_cert_check}" == "true" && -n "${nav_ee_image}" && "${nav_ee_image}" != localhost/* ]]; then
+      if [[ "${nav_container_engine}" == "docker" ]]; then
+        echo "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true is only supported with podman engine." >&2
+        exit 1
+      fi
+      pre_pull_args=( --tls-verify=false )
+      if [[ "${nav_skip_auth}" == "true" ]]; then
+        echo "Pre-pulling EE image with TLS verification disabled (anonymous): ${nav_ee_image}" >&2
+        env -u REGISTRY_AUTH_FILE podman pull "${pre_pull_args[@]}" "${nav_ee_image}" >/dev/null
+      else
+        echo "Pre-pulling EE image with TLS verification disabled: ${nav_ee_image}" >&2
+        podman pull "${pre_pull_args[@]}" "${nav_ee_image}" >/dev/null
+      fi
+    fi
     cmd=(ansible-navigator --mode "${nav_mode}" --cdcp "${nav_collection_doc_cache_path}")
     cmd+=(--ce "${nav_container_engine}")
     if [[ -n "${nav_ee_image}" ]]; then
