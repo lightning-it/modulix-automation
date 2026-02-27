@@ -1,0 +1,25 @@
+---
+# Purpose:
+# - Provision Wunderbox VM on VMware:
+#   1) Create/update VM from template
+#   2) Wait for SSH bootstrap port
+#
+# Usage:
+# ansible-navigator run playbooks/services/10-wunderbox-vmware-provision.yml \
+#   -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+
+- import_playbook: ../stage-1/infrastructure-platform-vsphere/20-vm-template.yml
+
+- name: Wait for target SSH bootstrap port after VM creation
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH port to be reachable
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ linux_bootstrap_ssh_port | default(sshd_port | default(22)) | int }}"
+        state: started
+        delay: "{{ rebuild_vm_boot_wait_delay | default(20) }}"
+        sleep: 5
+        timeout: "{{ rebuild_vm_boot_wait_timeout | default(900) }}"
+      delegate_to: localhost

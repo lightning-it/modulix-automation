@@ -1,0 +1,9 @@
+---
+# Purpose:
+# - Apply Wunderbox service stack configuration (stage-2b)
+#
+# Usage:
+# ansible-navigator run playbooks/services/12-wunderbox-service-stack.yml \
+#   -i inventories/example/inventory.yml --limit wunderbox01.prd.dmz.corp.l-it.io
+
+- import_playbook: ../stage-2b/12-wunderbox.yml
