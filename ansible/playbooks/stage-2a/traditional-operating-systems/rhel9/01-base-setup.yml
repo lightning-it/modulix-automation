@@ -399,22 +399,62 @@
       when: network_cleanup_inactive_profiles | default(false) | bool
       tags: [network]
 
+    - name: Network - parse connection profiles
+      ansible.builtin.set_fact:
+        network_nmcli_profiles: >-
+          {%- set rows = [] -%}
+          {%- for line in (network_nmcli_connections.stdout_lines | default([])) -%}
+          {%- set parts = line.split(':', 2) -%}
+          {%- if parts | length > 2 -%}
+          {%- set _ = rows.append({
+                'name': parts[0],
+                'uuid': parts[1],
+                'device': parts[2]
+              }) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ rows }}
+      changed_when: false
+      when: network_cleanup_inactive_profiles | default(false) | bool
+      tags: [network]
+
     - name: Network - build inactive profile list
       ansible.builtin.set_fact:
         network_nmcli_inactive_uuids: >-
           {%- set ids = [] -%}
-          {%- for line in (network_nmcli_connections.stdout_lines | default([])) -%}
-          {%- set parts = line.split(':', 2) -%}
-          {%- if parts | length > 2 -%}
-          {%- set name = parts[0] -%}
-          {%- set uuid = parts[1] -%}
-          {%- set device = parts[2] -%}
-          {%- if (device == '' or device == '--') and (name not in network_cleanup_desired_names | default([])) -%}
-          {%- set _ = ids.append(uuid) -%}
-          {%- endif -%}
+          {%- set desired = (network_cleanup_desired_names | default([]) | unique | list) -%}
+          {%- set profiles = (network_nmcli_profiles | default([])) -%}
+
+          {# Remove inactive profiles no longer desired #}
+          {%- for p in profiles -%}
+          {%- if (p.device == '' or p.device == '--') and (p.name not in desired) -%}
+          {%- set _ = ids.append(p.uuid) -%}
           {%- endif -%}
           {%- endfor -%}
-          {{ ids }}
+
+          {# Remove inactive duplicates for desired names (keep one profile per name) #}
+          {%- for name in desired -%}
+          {%- set active = [] -%}
+          {%- set inactive = [] -%}
+          {%- for p in profiles if p.name == name -%}
+          {%- if p.device == '' or p.device == '--' -%}
+          {%- set _ = inactive.append(p) -%}
+          {%- else -%}
+          {%- set _ = active.append(p) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- if (active | length) > 0 -%}
+          {%- for p in inactive -%}
+          {%- set _ = ids.append(p.uuid) -%}
+          {%- endfor -%}
+          {%- elif (inactive | length) > 1 -%}
+          {%- for p in (inactive[1:]) -%}
+          {%- set _ = ids.append(p.uuid) -%}
+          {%- endfor -%}
+          {%- endif -%}
+          {%- endfor -%}
+
+          {{ ids | unique }}
       changed_when: false
       when: network_cleanup_inactive_profiles | default(false) | bool
       tags: [network]
