@@ -21,7 +21,7 @@ This matrix defines supported execution modes for ModuLix automation.
 
 | Component | Value |
 |---|---|
-| Default toolbox image | `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.7.0` |
+| Default toolbox image | `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.7.2` |
 | Execution style | `ansible-navigator run --ee true` |
 
 ## Collection source
