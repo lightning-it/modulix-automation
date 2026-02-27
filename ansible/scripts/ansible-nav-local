@@ -291,7 +291,7 @@ case "${subcommand}" in
       "${effective_collections_requirements}" \
       "${collections_install_path}" \
       "${collections_stamp_file}"
-    if [[ "${nav_skip_cert_check}" == "true" && -n "${nav_ee_image}" && "${nav_ee_image}" != localhost/* ]]; then
+    if [[ "${nav_pull_policy}" != "never" && "${nav_skip_cert_check}" == "true" && -n "${nav_ee_image}" && "${nav_ee_image}" != localhost/* ]]; then
       if [[ "${nav_container_engine}" == "docker" ]]; then
         echo "ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true is only supported with podman engine." >&2
         exit 1

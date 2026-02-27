@@ -55,8 +55,14 @@ RUN_EE_IMAGE="${RUN_EE_IMAGE:-quay.io/l-it/ee-wunder-ansible-ubi9-certified:v1.1
 RUN_TOOLBOX_IMAGE="${RUN_TOOLBOX_IMAGE:-quay.io/l-it/ee-wunder-toolbox-ubi9:v1.5.6}"
 VAULT_PASS_FILE="$(abs_path "${VAULT_PASS_FILE:-$PWD_ABS/.vault-pass.txt}")"
 AUTHFILE="$(abs_path "${AUTHFILE:-$PWD_ABS/.podman-auth.json}")"
+RUN_USE_HOST_EE_IMAGE="${RUN_USE_HOST_EE_IMAGE:-true}"
 RUN_SKIP_AUTH="${RUN_SKIP_AUTH:-false}"
 RUN_SKIP_CERT_CHECK="${RUN_SKIP_CERT_CHECK:-false}"
+
+case "$RUN_USE_HOST_EE_IMAGE" in
+  true|false) ;;
+  *) die "RUN_USE_HOST_EE_IMAGE must be true or false (got: $RUN_USE_HOST_EE_IMAGE)" ;;
+esac
 
 case "$RUN_SKIP_AUTH" in
   true|false) ;;
@@ -133,23 +139,24 @@ pull_image() {
   podman pull "${pull_args[@]}" "$image" >/dev/null
 }
 
-pre_pull_run_ee_inside_toolbox() {
+load_run_ee_into_toolbox_from_host() {
   local image="$1"
-  local pull_cmd=( podman pull )
-
-  if [[ "$image" == localhost/* ]]; then
-    return
+  local cache_dir="$PWD_ABS/.run-modulix-cache"
+  local archive=""
+  local runner_archive=""
+  echo "Syncing run EE image from host store into toolbox: $image" >&2
+  mkdir -p -- "$cache_dir"
+  archive="$(mktemp "$cache_dir/run-ee-image.XXXXXX.tar")"
+  runner_archive="$(runner_path "$archive")"
+  if ! podman save -o "$archive" "$image" >/dev/null; then
+    rm -f -- "$archive"
+    return 1
   fi
-
-  if [[ "$RUN_SKIP_AUTH" != "true" ]]; then
-    pull_cmd+=( --authfile "$RUNNER_AUTHFILE" )
+  if ! run_toolbox false podman load -i "$runner_archive" >/dev/null; then
+    rm -f -- "$archive"
+    return 1
   fi
-  if [[ "$RUN_SKIP_CERT_CHECK" == "true" ]]; then
-    pull_cmd+=( --tls-verify=false )
-  fi
-  pull_cmd+=( "$image" )
-
-  run_toolbox false "${pull_cmd[@]}" >/dev/null
+  rm -f -- "$archive"
 }
 
 run_toolbox() {
@@ -171,7 +178,7 @@ run_toolbox() {
   if [[ "$RUN_SKIP_AUTH" != "true" ]]; then
     envs+=( -e "REGISTRY_AUTH_FILE=$RUNNER_AUTHFILE" )
   fi
-  if [[ "$RUN_SKIP_CERT_CHECK" == "true" ]]; then
+  if [[ "$RUN_USE_HOST_EE_IMAGE" == "true" ]]; then
     envs+=( -e ANSIBLE_TOOLBOX_NAV_PULL_POLICY=never )
   fi
   [[ -n "${VAULT_TOKEN:-}" ]] && envs+=( -e "VAULT_TOKEN=${VAULT_TOKEN}" )
@@ -304,10 +311,10 @@ run_services() {
 
   ensure_authfile_for_remote "$RUN_EE_IMAGE"
   ensure_authfile_for_remote "$RUN_TOOLBOX_IMAGE"
-  pull_image "$RUN_EE_IMAGE"
   pull_image "$RUN_TOOLBOX_IMAGE"
-  if [[ "$RUN_SKIP_AUTH" == "true" || "$RUN_SKIP_CERT_CHECK" == "true" ]]; then
-    pre_pull_run_ee_inside_toolbox "$RUN_EE_IMAGE"
+  if [[ "$RUN_USE_HOST_EE_IMAGE" == "true" ]]; then
+    pull_image "$RUN_EE_IMAGE"
+    load_run_ee_into_toolbox_from_host "$RUN_EE_IMAGE"
   fi
 
   run_toolbox true ansible-nav-local run "$playbook" "${run_args[@]}"

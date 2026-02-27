@@ -14,6 +14,8 @@ It uses an inventory, a Vault password file, an SSH agent, and registry auth dur
 export INVENTORY_DIR="$PWD/ansible-inventory-lit/inventories"
 export VAULT_PASS_FILE="$PWD/.vault-pass.txt"
 export AUTHFILE="$PWD/.podman-auth.json"
+# optional: host pulls EE image once, then streams it into toolbox (recommended)
+export RUN_USE_HOST_EE_IMAGE=true
 # optional: skip registry authentication (anonymous pulls)
 export RUN_SKIP_AUTH=false
 # optional: disable TLS cert verification for image pulls (host + nested EE pull)
@@ -26,6 +28,12 @@ If your mirror allows anonymous pulls but uses an untrusted/private CA, set both
 ```bash
 export RUN_SKIP_AUTH=true
 export RUN_SKIP_CERT_CHECK=true
+```
+
+To allow direct nested pulls inside toolbox (legacy behavior), disable host image transfer:
+
+```bash
+export RUN_USE_HOST_EE_IMAGE=false
 ```
 
 ```bash
