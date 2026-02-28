@@ -141,7 +141,7 @@ find_container_api_socket() {
 
 find_inventory_source() {
   local from_env="${ANSIBLE_TOOLBOX_INVENTORY_SOURCE:-${ANSIBLE_NAVIGATOR_INVENTORY_SOURCE:-}}"
-  local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory-lit/inventories"
+  local default_source="${SOURCE_ROOT_DEFAULT}/ansible-inventory/inventories"
 
   if [[ -n "${from_env}" ]]; then
     if [[ -d "${from_env}" ]]; then

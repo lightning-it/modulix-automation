@@ -239,7 +239,7 @@ Default toolbox image:
 - `quay.io/l-it/ee-wunder-toolbox-ubi9:v1.7.2`
 
 Wrapper behavior (`scripts/ansible-nav`):
-- External inventories are auto-mounted from `../../ansible-inventory-lit/inventories` to `/runner/project/inventories` when available.
+- External inventories are auto-mounted from `../../ansible-inventory/inventories` to `/runner/project/inventories` when available.
 - When inventory mount is active, `-i inventories/...` is automatically rewritten to `/runner/project/inventories/...` for execution environment compatibility.
 - Host SSH directory is auto-mounted from `~/.ssh` to `/runner/.ssh` so inventory paths like `/runner/.ssh/id_ed25519` work inside the execution environment.
 - Host `SSH_AUTH_SOCK` is auto-mounted to `/runner/ssh-agent.sock` and exported in-container.
