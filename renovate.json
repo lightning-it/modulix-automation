@@ -11,8 +11,7 @@
         "/^docs\\/runtime-contract\\.md$/",
         "/^docs\\/support-matrix\\.md$/",
         "/^ansible\\/scripts\\/ansible-nav$/",
-        "/^ansible\\/README\\.md$/",
-        "/^scripts\\/modulix\\/run-modulix\\.sh$/"
+        "/^ansible\\/README\\.md$/"
       ],
       "matchStrings": [
         "quay\\.io\\/l-it\\/ee-wunder-toolbox-ubi9:(?<currentValue>[^\\s`\\\"\\)\\}]+)"
