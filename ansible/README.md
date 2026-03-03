@@ -174,6 +174,25 @@ ansible-navigator run playbooks/stage-2b/12-wunderbox.yml -i inventories/corp/in
 
 ---
 
+## OCP
+
+### Install
+```bash
+VAULT_TOKEN=$(cat $HOME/.vault-token) ansible-navigator run playbooks/stage-2c/container-platform-ocp4/20-ocp-install.yml -i inventories/corp/inventory.yml -l ocp -e install_agent_hashi_vault_auth_method=token
+```
+
+### GitOps
+```bash
+VAULT_TOKEN=$(cat $HOME/.vault-token) ansible-navigator run playbooks/stage-2c/container-platform-ocp4/21-post-install.yml -i inventories/corp/inventory.yml -l ocp -e install_agent_hashi_vault_auth_method=token -e approve_all=true
+```
+
+### Destroy
+```bash
+VAULT_TOKEN=$(cat $HOME/.vault-token) ansible-navigator run playbooks/stage-2c/container-platform-ocp4/99-ocp-destroy.yml -i inventories/corp/inventory.yml -l ocp -e install_agent_hashi_vault_auth_method=token
+```
+
+---
+
 ## Secrets
 
 - **Do not commit secrets.**

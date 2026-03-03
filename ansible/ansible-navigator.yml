@@ -2,7 +2,7 @@ ansible-navigator:
   execution-environment:
     enabled: true
     container-engine: podman
-    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.7.1
+    image: quay.io/l-it/ee-wunder-ansible-ubi9:v1.12.3
     pull:
       policy: missing
     container-options:
