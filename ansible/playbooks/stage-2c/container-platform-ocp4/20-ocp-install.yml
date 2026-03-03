@@ -3,11 +3,12 @@
   hosts: ocp
   gather_facts: false
   vars:
-    vmware_hosts: "{{ inventory_hostname }}"
+    vmware_vsphere_destroy: false
+    vmware_vsphere_power_on: false
   roles:
-    - role: lit.foundation_services.vmware_vsphere
+    - role: lit.foundational.vmware_vsphere
       tags:
         - vmware_vsphere
-    - role: lit.foundation_services.ocp_install
+    - role: lit.ocp.install_agent
       tags:
         - ocp_install

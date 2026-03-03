@@ -9,15 +9,16 @@ ansible-navigator:
       - "--user=1000"
       - "--volume=.:/runner/project"
       - "--workdir=/runner/project"
+      - "--net=host"
     environment-variables:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE
         - VAULT_TOKEN
       set:
-        HOME: /tmp
         ANSIBLE_CONFIG: /runner/project/ansible.cfg
         ANSIBLE_LOCAL_TEMP: /tmp
         ANSIBLE_REMOTE_TEMP: /tmp
+        TMPDIR: /tmp
         ANSIBLE_COLLECTIONS_PATH: "/runner/project/collections-dev:/runner/project/collections:/usr/share/ansible/collections:/usr/share/automation-controller/collections:/runner/collections"
   mode: stdout
   playbook-artifact:

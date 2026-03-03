@@ -3,10 +3,9 @@
   hosts: ocp
   gather_facts: false
   vars:
-    vmware_hosts: "{{ inventory_hostname }}"
-    vvs_destroy: true
+    vmware_vsphere_destroy: true
   roles:
-    - role: lit.foundation_services.vmware_vsphere
+    - role: lit.foundational.vmware_vsphere
   tasks:
     - name: Delete kubeadmin and kubeconfig from Hashicorp Vault
       run_once: true
@@ -15,21 +14,21 @@
         - destroy_all
       block:
         - name: Retrieve current secret
-          delegate_to: "{{ vvs_delegate_to }}"
+          delegate_to: "{{ vmware_vsphere_delegate_to }}"
           run_once: true
           community.hashi_vault.vault_kv2_get:
             url: "{{ vault_address }}"
-            engine_mount_point: "{{ ins_engine_mount_point }}"
-            path: "{{ ins_vault_path }}/install"
-            auth_method: "{{ ins_hashi_vault_auth_method }}"
+            engine_mount_point: "{{ vault_engine_mount_point }}"
+            path: "{{ install_agent_vault_path }}/install"
+            auth_method: "{{ install_agent_hashi_vault_auth_method }}"
             role_id: "{{ ansible_hashi_vault_role_id | default('') }}"
             secret_id: "{{ ansible_hashi_vault_secret_id | default('') }}"
-            validate_certs: "{{ ins_hashi_vault_validate_certs }}"
+            validate_certs: "{{ install_agent_hashi_vault_validate_certs }}"
           register: current
           no_log: true
 
         - name: Delete value from kubeconfig and password in vault
-          delegate_to: "{{ vvs_delegate_to }}"
+          delegate_to: "{{ vmware_vsphere_delegate_to }}"
           run_once: true
           vars:
             values_to_update:
@@ -38,12 +37,12 @@
               password: ""
           community.hashi_vault.vault_kv2_write:
             url: "{{ vault_address }}"
-            engine_mount_point: "{{ ins_engine_mount_point }}"
-            path: "{{ ins_vault_path }}/install"
-            auth_method: "{{ ins_hashi_vault_auth_method }}"
+            engine_mount_point: "{{ vault_engine_mount_point }}"
+            path: "{{ install_agent_vault_path }}/install"
+            auth_method: "{{ install_agent_hashi_vault_auth_method }}"
             role_id: "{{ ansible_hashi_vault_role_id | default('') }}"
             secret_id: "{{ ansible_hashi_vault_secret_id | default('') }}"
-            validate_certs: "{{ ins_hashi_vault_validate_certs }}"
+            validate_certs: "{{ install_agent_hashi_vault_validate_certs }}"
             data: >-
               {{
                 current.secret
