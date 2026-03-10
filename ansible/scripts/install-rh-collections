@@ -14,7 +14,6 @@ ah_token="${RH_AUTOMATION_HUB_TOKEN:-}"
 sso_token_url="${AUTOMATION_HUB_SSO_TOKEN_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 required_collections="${RH_COLLECTIONS_REQUIRED:-ansible.controller}"
 rh_collections_use="${RH_COLLECTIONS_USE:-true}"
-rh_collections_pre="${RH_COLLECTIONS_PRE:-false}"
 
 if ! command -v ansible-galaxy >/dev/null 2>&1; then
   if [[ -x "${SCRIPT_DIR}/ansible-nav" ]]; then
@@ -40,14 +39,6 @@ case "${rh_collections_use}" in
   true|false) ;;
   *)
     echo "Invalid RH_COLLECTIONS_USE='${rh_collections_use}' (use: true|false)." >&2
-    exit 2
-    ;;
-esac
-
-case "${rh_collections_pre}" in
-  true|false) ;;
-  *)
-    echo "Invalid RH_COLLECTIONS_PRE='${rh_collections_pre}' (use: true|false)." >&2
     exit 2
     ;;
 esac
@@ -114,10 +105,6 @@ install_cmd_base=(
   --collections-path "${target_path}"
 )
 
-if [[ "${rh_collections_pre}" == "true" ]]; then
-  install_cmd_base+=(--pre)
-fi
-
 if [[ -f "${requirements_file}" ]]; then
   if [[ -n "${ah_token}" ]]; then
     echo "Installing RH extension collections from ${requirements_file} via Automation Hub"
@@ -127,14 +114,10 @@ if [[ -f "${requirements_file}" ]]; then
     else
       echo "INFO: Using servers: ${ah_server_published} and ${ah_server_validated}"
     fi
-    if [[ "${rh_collections_pre}" == "true" ]]; then
-      echo "INFO: Allowing pre-release collection versions (--pre)."
-    fi
     if ! run_install_with_auth_url_flow "${ah_token}"; then
       echo "ERROR: Automation Hub install failed." >&2
       echo "Hint: token/auth may be fine; check collection version constraints in ${requirements_file}." >&2
       echo "Hint: collections in the 'validated' repository require the validated endpoint." >&2
-      echo "Hint: if your channel only has pre-release builds, retry with RH_COLLECTIONS_PRE=true." >&2
       exit 1
     fi
   else

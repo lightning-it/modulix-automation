@@ -529,8 +529,7 @@ for pass_var in \
   RH_COLLECTIONS_REQUIREMENTS_FILE \
   RH_COLLECTIONS_TARGET \
   RH_COLLECTIONS_STRICT \
-  RH_COLLECTIONS_REQUIRED \
-  RH_COLLECTIONS_PRE; do
+  RH_COLLECTIONS_REQUIRED; do
   pass_value="${!pass_var:-}"
   if [[ -n "${pass_value}" ]]; then
     container_args+=(-e "${pass_var}=${pass_value}")
