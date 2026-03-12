@@ -26,7 +26,9 @@ default_collections_requirements_rh="${REPO_ROOT}/collections/requirements-rh.ym
 collections_requirements="${ANSIBLE_TOOLBOX_COLLECTIONS_REQUIREMENTS:-}"
 collections_install_path="${ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH:-${REPO_ROOT}/collections}"
 collections_stamp_file="${ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE:-}"
-automation_hub_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL:-https://console.redhat.com/api/automation-hub/content/published/}"
+automation_hub_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL:-}"
+automation_hub_url_published="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_PUBLISHED:-https://console.redhat.com/api/automation-hub/content/published/}"
+automation_hub_url_validated="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_VALIDATED:-https://console.redhat.com/api/automation-hub/content/validated/}"
 automation_hub_auth_url="${ANSIBLE_TOOLBOX_AUTOMATION_HUB_AUTH_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 
 usage() {
@@ -50,6 +52,9 @@ Environment:
   ANSIBLE_TOOLBOX_COLLECTIONS_INSTALL_PATH=<path>  (default: ./collections)
   ANSIBLE_TOOLBOX_COLLECTIONS_STAMP_FILE=<path>    (default: ${ANSIBLE_HOME}/collections.requirements.sha256)
   RH_AUTOMATION_HUB_TOKEN=<token>                  (optional, required for certified collections)
+  ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL=<url>         (optional legacy single Automation Hub server URL)
+  ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_PUBLISHED=<url> (optional published server URL)
+  ANSIBLE_TOOLBOX_AUTOMATION_HUB_URL_VALIDATED=<url> (optional validated server URL)
 EOF
 }
 
@@ -136,7 +141,8 @@ build_galaxy_config_for_certified() {
   local token="$1"
   local config_file=""
   config_file="$(mktemp /tmp/ansible-galaxy.auto.XXXXXX.cfg)"
-  cat > "${config_file}" <<EOF
+  if [[ -n "${automation_hub_url}" ]]; then
+    cat > "${config_file}" <<EOF
 [galaxy]
 server_list = automation_hub,galaxy
 
@@ -148,6 +154,25 @@ token = ${token}
 [galaxy_server.galaxy]
 url = https://galaxy.ansible.com/
 EOF
+  else
+    cat > "${config_file}" <<EOF
+[galaxy]
+server_list = automation_hub_published,automation_hub_validated,galaxy
+
+[galaxy_server.automation_hub_published]
+url = ${automation_hub_url_published}
+auth_url = ${automation_hub_auth_url}
+token = ${token}
+
+[galaxy_server.automation_hub_validated]
+url = ${automation_hub_url_validated}
+auth_url = ${automation_hub_auth_url}
+token = ${token}
+
+[galaxy_server.galaxy]
+url = https://galaxy.ansible.com/
+EOF
+  fi
   printf '%s\n' "${config_file}"
 }
 

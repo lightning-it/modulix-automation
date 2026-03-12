@@ -7,7 +7,9 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 requirements_file="${RH_COLLECTIONS_REQUIREMENTS_FILE:-${REPO_ROOT}/collections/requirements-rh.yml}"
 target_path="${RH_COLLECTIONS_TARGET:-${REPO_ROOT}/collections-dev}"
 strict="${RH_COLLECTIONS_STRICT:-true}"
-ah_server="${AUTOMATION_HUB_GALAXY_SERVER:-https://console.redhat.com/api/automation-hub/content/published/}"
+ah_server="${AUTOMATION_HUB_GALAXY_SERVER:-}"
+ah_server_published="${AUTOMATION_HUB_GALAXY_SERVER_PUBLISHED:-https://console.redhat.com/api/automation-hub/content/published/}"
+ah_server_validated="${AUTOMATION_HUB_GALAXY_SERVER_VALIDATED:-https://console.redhat.com/api/automation-hub/content/validated/}"
 ah_token="${RH_AUTOMATION_HUB_TOKEN:-}"
 sso_token_url="${AUTOMATION_HUB_SSO_TOKEN_URL:-https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token}"
 required_collections="${RH_COLLECTIONS_REQUIRED:-ansible.controller}"
@@ -51,7 +53,8 @@ run_install_with_auth_url_flow() {
   local tmp_cfg
   tmp_cfg="$(mktemp "/tmp/automation-hub-ansible-galaxy.XXXXXX.cfg")"
 
-  cat >"${tmp_cfg}" <<EOF
+  if [[ -n "${ah_server}" ]]; then
+    cat >"${tmp_cfg}" <<EOF
 [galaxy]
 server_list = automation_hub
 
@@ -60,6 +63,22 @@ url = ${ah_server}
 auth_url = ${sso_token_url}
 token = ${token}
 EOF
+  else
+    cat >"${tmp_cfg}" <<EOF
+[galaxy]
+server_list = automation_hub_published,automation_hub_validated
+
+[galaxy_server.automation_hub_published]
+url = ${ah_server_published}
+auth_url = ${sso_token_url}
+token = ${token}
+
+[galaxy_server.automation_hub_validated]
+url = ${ah_server_validated}
+auth_url = ${sso_token_url}
+token = ${token}
+EOF
+  fi
 
   if ! ANSIBLE_CONFIG="${tmp_cfg}" "${install_cmd_base[@]}" -r "${requirements_file}"; then
     rm -f "${tmp_cfg}"
@@ -90,8 +109,15 @@ if [[ -f "${requirements_file}" ]]; then
   if [[ -n "${ah_token}" ]]; then
     echo "Installing RH extension collections from ${requirements_file} via Automation Hub"
     echo "INFO: Using galaxy auth_url flow."
+    if [[ -n "${ah_server}" ]]; then
+      echo "INFO: Using configured server: ${ah_server}"
+    else
+      echo "INFO: Using servers: ${ah_server_published} and ${ah_server_validated}"
+    fi
     if ! run_install_with_auth_url_flow "${ah_token}"; then
-      echo "ERROR: Automation Hub install failed. Provide a valid RH_AUTOMATION_HUB_TOKEN." >&2
+      echo "ERROR: Automation Hub install failed." >&2
+      echo "Hint: token/auth may be fine; check collection version constraints in ${requirements_file}." >&2
+      echo "Hint: collections in the 'validated' repository require the validated endpoint." >&2
       exit 1
     fi
   else

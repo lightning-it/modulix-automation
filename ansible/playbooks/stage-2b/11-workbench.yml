@@ -1,9 +1,9 @@
 ---
 # -----------------------------------------------------------------------------
-# Workstations - GUI + RDP
+# Workbenches - GUI + RDP
 #
 # Purpose:
-# - Apply workstation firewall policy (only if `firewall:` vars are provided)
+# - Apply workbench firewall policy (only if `firewall:` vars are provided)
 # - Install a GUI stack (GNOME or XFCE) via lit.rhel.gui
 # - Enable RDP access via XRDP (lit.rhel.xrdp) for remote administration
 #
@@ -13,8 +13,8 @@
 # - Keep firewall rules restrictive: prefer exposing RDP only in your admin/mgmt zone.
 # -----------------------------------------------------------------------------
 
-- name: Configure workstations
-  hosts: workstations
+- name: Configure workbenches
+  hosts: workbenches
   become: true
   gather_facts: true
 

@@ -321,6 +321,13 @@
       when: rhsm_method | default('none') != 'none'
       tags: [rhsm]
 
+    - name: Repos
+      ansible.builtin.include_role:
+        name: lit.rhel.repos
+        apply:
+          tags: [repos]
+      tags: [repos]
+
     - name: Baseline
       ansible.builtin.include_role:
         name: lit.rhel.baseline

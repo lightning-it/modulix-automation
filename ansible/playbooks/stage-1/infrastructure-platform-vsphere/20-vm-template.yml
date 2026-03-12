@@ -22,7 +22,7 @@
         fail_msg: >
           ansible_limit must be a single hostname (no groups/patterns).
           Example:
-          --limit workstation01.prd.com.corp.l-it.io
+          --limit workbench01.prd.com.corp.l-it.io
       when: ansible_limit is defined
       run_once: true
 

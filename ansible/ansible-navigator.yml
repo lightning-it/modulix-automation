@@ -12,7 +12,9 @@ ansible-navigator:
     pull:
       policy: missing
     container-options:
-      - "--network=slirp4netns"
+      # Use host networking so EE sessions can reach services bound on the local host
+      # (e.g. Vault on wunderbox02 at 10.34.71.113:8200).
+      - "--network=host"
     environment-variables:
       pass:
         - ANSIBLE_VAULT_PASSWORD_FILE

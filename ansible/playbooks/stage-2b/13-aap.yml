@@ -16,26 +16,59 @@
   gather_facts: true
 
   tasks:
-    - name: Enable required repos
-      ansible.builtin.include_role:
-        name: lit.rhel.repos
-        apply:
-          tags: [repos]
-      tags: [repos]
-
-    # Firewall System Role: only run if "firewall" var is provided (to avoid accidental resets)
-    - name: Apply firewall policy
-      ansible.builtin.include_role:
-        name: fedora.linux_system_roles.firewall
-        apply:
-          tags: [firewall]
-      when: (firewall | default([], true) | length) > 0
-      tags: [firewall]
-
     - name: Seed AAP passwords from Vault (optional, backend orchestration outside role)
       ansible.builtin.import_tasks: tasks/aap_seed_passwords_vault.yml
       when: aap_password_seed_enabled | default(false) | bool
-      tags: [aap, aap_deploy, aap_passwords, vault]
+      tags:
+        - aap
+        - aap_deploy
+        - aap_passwords
+        - vault
+        - aap_cac
+        - settings
+        - organizations
+        - gateway_users
+        - gateway_teams
+        - gateway_role_user_assignments
+        - controller_license
+        - controller_credential_types
+        - labels
+        - controller_credentials
+        - controller_projects
+        - controller_instance_groups
+        - controller_inventories
+        - controller_inventory_sources
+        - controller_templates
+        - hub_collection_remote
+        - hub_collection_remotes
+        - hub_collection_repository
+        - hub_collection_repositories
+        - hub_collection_repository_sync
+        - hub_group_roles
+        - filetree_create
+        - filetree_read
+        - bulk_host_create
+        - hosts
+        - groups
+        - instances
+        - ad_hoc_command
+        - ad_hoc_command_cancel
+        - bulk_job_launch
+        - job_launch
+        - jobs_cancel
+        - workflow_job_templates
+        - workflow_launch
+        - applications
+        - credential_input_sources
+        - dispatch
+        - execution_environments
+        - global_vars
+        - notification_templates
+        - object_diff
+        - project_update
+        - roles
+        - schedules
+        - ee_builder
 
     - name: Prepare AAP shared context
       ansible.builtin.include_role:
@@ -56,7 +89,53 @@
         name: lit.supplementary.aap_cac
         apply:
           tags: [aap, aap_cac]
-      tags: [aap, aap_cac]
+      tags:
+        - aap
+        - aap_cac
+        - settings
+        - organizations
+        - gateway_users
+        - gateway_teams
+        - gateway_role_user_assignments
+        - controller_license
+        - controller_credential_types
+        - labels
+        - controller_credentials
+        - controller_projects
+        - controller_instance_groups
+        - controller_inventories
+        - controller_inventory_sources
+        - controller_templates
+        - hub_collection_remote
+        - hub_collection_remotes
+        - hub_collection_repository
+        - hub_collection_repositories
+        - hub_collection_repository_sync
+        - hub_group_roles
+        - filetree_create
+        - filetree_read
+        - bulk_host_create
+        - hosts
+        - groups
+        - instances
+        - ad_hoc_command
+        - ad_hoc_command_cancel
+        - bulk_job_launch
+        - job_launch
+        - jobs_cancel
+        - workflow_job_templates
+        - workflow_launch
+        - applications
+        - credential_input_sources
+        - dispatch
+        - execution_environments
+        - global_vars
+        - notification_templates
+        - object_diff
+        - project_update
+        - roles
+        - schedules
+        - ee_builder
 
     # Day-2 operations (default action is none; enables `-t aap_ops -e aap_ops_action=...`)
     - name: AAP ops
