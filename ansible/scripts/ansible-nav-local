@@ -11,6 +11,7 @@ nav_ee_image="${ANSIBLE_TOOLBOX_NAV_EE_IMAGE:-}"
 nav_pull_policy="${ANSIBLE_TOOLBOX_NAV_PULL_POLICY:-}"
 nav_skip_auth="${ANSIBLE_TOOLBOX_NAV_SKIP_AUTH:-false}"
 nav_skip_cert_check="${ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK:-false}"
+nav_ee_container_options="${ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS:-}"
 nav_cache_dir="${ANSIBLE_TOOLBOX_NAV_CACHE_DIR:-/tmp/.cache}"
 nav_collection_doc_cache_path="${ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH:-${nav_cache_dir}/ansible-navigator/collection_doc_cache.db}"
 if [[ -n "${ANSIBLE_TOOLBOX_AUTO_COLLECTIONS+x}" ]]; then
@@ -45,6 +46,7 @@ Environment:
   ANSIBLE_TOOLBOX_NAV_PULL_POLICY=always|missing|never|tag (default: ansible-navigator config/env)
   ANSIBLE_TOOLBOX_NAV_SKIP_AUTH=true|false         (default: false)
   ANSIBLE_TOOLBOX_NAV_SKIP_CERT_CHECK=true|false   (default: false)
+  ANSIBLE_NAVIGATOR_EXECUTION_ENVIRONMENT_CONTAINER_OPTIONS=<opt>
   ANSIBLE_TOOLBOX_NAV_CACHE_DIR=/tmp/.cache        (default: /tmp/.cache)
   ANSIBLE_TOOLBOX_NAV_COLLECTION_DOC_CACHE_PATH=... (default: /tmp/.cache/ansible-navigator/collection_doc_cache.db)
   ANSIBLE_TOOLBOX_AUTO_COLLECTIONS=auto|true|false (default: false in /opt/modulix/ansible RPM mode, true otherwise)
@@ -338,6 +340,9 @@ case "${subcommand}" in
     fi
     if [[ -n "${nav_ee_image}" ]]; then
       cmd+=(--eei "${nav_ee_image}")
+    fi
+    if [[ -n "${nav_ee_container_options}" ]]; then
+      cmd+=("--co=${nav_ee_container_options}")
     fi
     if [[ -n "${nav_pull_policy}" ]]; then
       cmd+=(--pp "${nav_pull_policy}")
