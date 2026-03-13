@@ -59,7 +59,10 @@ Collection arguments:
   - absolute/relative path to a collection repo containing galaxy.yml
 
 Options:
-  --source-root <path>   Root containing ansible-collection-* repos
+  --source-root <path>   Root containing collection repos in one of these layouts:
+                           - ansible-collection-*
+                           - ansible-collections/<name>
+                           - <name> (direct repo dirs with galaxy.yml)
                          (default: ../../ from modulix/ansible)
   --target-path <path>   Install path for collections
                          (default: ./collections-dev)
@@ -72,6 +75,39 @@ Options:
 Environment overrides:
   SOURCE_ROOT, TARGET_PATH, INSTALL_DEPS, REQUIREMENTS_FILE
 EOF
+}
+
+resolve_collection_repo() {
+  local source_root="$1"
+  local item="$2"
+  local candidate=""
+
+  if [[ -d "${item}" && -f "${item}/galaxy.yml" ]]; then
+    cd -- "${item}" && pwd
+    return 0
+  fi
+
+  for candidate in \
+    "${source_root}/${item}" \
+    "${source_root}/ansible-collection-${item}" \
+    "${source_root}/ansible-collections/${item}"
+  do
+    if [[ -d "${candidate}" && -f "${candidate}/galaxy.yml" ]]; then
+      cd -- "${candidate}" && pwd
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+discover_collection_repos() {
+  local source_root="$1"
+  find "${source_root}" -maxdepth 1 -mindepth 1 -type d -exec test -f '{}/galaxy.yml' ';' -print | sort
+  find "${source_root}" -maxdepth 1 -mindepth 1 -type d -name 'ansible-collection-*' | sort
+  if [[ -d "${source_root}/ansible-collections" ]]; then
+    find "${source_root}/ansible-collections" -maxdepth 1 -mindepth 1 -type d -exec test -f '{}/galaxy.yml' ';' -print | sort
+  fi
 }
 
 declare -a requested=()
@@ -115,17 +151,21 @@ done
 declare -a collection_dirs=()
 if [[ ${#requested[@]} -eq 0 ]]; then
   while IFS= read -r d; do
-    collection_dirs+=("$d")
-  done < <(find "${SOURCE_ROOT}" -maxdepth 1 -mindepth 1 -type d -name 'ansible-collection-*' | sort)
+    [[ -n "${d}" ]] || continue
+    already_present=false
+    for existing in "${collection_dirs[@]}"; do
+      if [[ "${existing}" == "${d}" ]]; then
+        already_present=true
+        break
+      fi
+    done
+    if [[ "${already_present}" == "false" ]]; then
+      collection_dirs+=("$d")
+    fi
+  done < <(discover_collection_repos "${SOURCE_ROOT}")
 else
   for item in "${requested[@]}"; do
-    if [[ -d "${item}" && -f "${item}/galaxy.yml" ]]; then
-      collection_dirs+=("$(cd -- "${item}" && pwd)")
-      continue
-    fi
-
-    candidate="${SOURCE_ROOT}/ansible-collection-${item}"
-    if [[ -d "${candidate}" && -f "${candidate}/galaxy.yml" ]]; then
+    if candidate="$(resolve_collection_repo "${SOURCE_ROOT}" "${item}")"; then
       collection_dirs+=("${candidate}")
       continue
     fi
@@ -150,8 +190,7 @@ if [[ "${INSTALL_DEPS}" == "true" ]]; then
       while IFS= read -r dep; do
         [[ -n "${dep}" ]] || continue
         dep_short="${dep#lit.}"
-        dep_repo="${SOURCE_ROOT}/ansible-collection-${dep_short}"
-        if [[ -d "${dep_repo}" && -f "${dep_repo}/galaxy.yml" ]]; then
+        if dep_repo="$(resolve_collection_repo "${SOURCE_ROOT}" "${dep_short}")"; then
           already_present=false
           for existing in "${collection_dirs[@]}"; do
             if [[ "${existing}" == "${dep_repo}" ]]; then

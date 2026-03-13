@@ -3,14 +3,12 @@
 # Workbenches - GUI + RDP
 #
 # Purpose:
-# - Apply workbench firewall policy (only if `firewall:` vars are provided)
 # - Install a GUI stack (GNOME or XFCE) via lit.rhel.gui
 # - Enable RDP access via XRDP (lit.rhel.xrdp) for remote administration
 #
 # Notes:
 # - Select GUI via vars: `gui_variant: gnome|xfce` (default: gnome)
 # - Control XRDP via vars: `xrdp_firewalld_zone`, `xrdp_listen_port`, TLS options, etc.
-# - Keep firewall rules restrictive: prefer exposing RDP only in your admin/mgmt zone.
 # -----------------------------------------------------------------------------
 
 - name: Configure workbenches
@@ -19,13 +17,14 @@
   gather_facts: true
 
   roles:
-    - role: lit.rhel.repos
-      tags: [repos]
+    - role: lit.rhel.developer_tools
+      tags: [packages, developer_tools]
 
-    # Firewall System Role: only run if "firewall" var is provided (to avoid accidental resets)
-    - role: fedora.linux_system_roles.firewall
-      when: (firewall | default([], true) | length) > 0
-      tags: [firewall]
+    - role: lit.rhel.vscode_deploy
+      tags: [packages, vscode, vscode_deploy]
+
+    - role: lit.rhel.vscode_config
+      tags: [vscode, vscode_config]
 
     # GUI stack (GNOME or XFCE)
     - role: lit.rhel.gui
