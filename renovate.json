@@ -34,6 +34,19 @@
   "customManagers": [
     {
       "customType": "regex",
+      "description": "Track ee-wunder-devtools-ubi9 image references in agent docs",
+      "managerFilePatterns": [
+        "/(^|.*\\/)AGENTS?\\.md$/"
+      ],
+      "matchStrings": [
+        "quay\\.io\\/l-it\\/ee-wunder-devtools-ubi9:v(?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "quay.io/l-it/ee-wunder-devtools-ubi9",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
       "description": "Track default toolbox image references in docs and runtime scripts",
       "managerFilePatterns": [
         "/^docs\\/runtime-contract\\.md$/",

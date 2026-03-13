@@ -18,7 +18,7 @@ podman run --rm \
   -e GIT_CONFIG_VALUE_0=/workspace \
   -v "$PWD":/workspace:Z \
   -w /workspace \
-  quay.io/l-it/ee-wunder-devtools-ubi9:v1.6.0 \
+  quay.io/l-it/ee-wunder-devtools-ubi9:v1.8.1 \
   pre-commit run --all-files
 ```
 
@@ -29,8 +29,8 @@ podman run --rm \
   --security-opt label=disable \
   -v "$PWD":/workspace:Z \
   -w /workspace \
-  quay.io/l-it/ee-wunder-devtools-ubi9:v1.6.0 \
-  bash -lc 'set -euo pipefail; rpmspec -P packaging/rpm/modulix-automation-runtime.spec >/tmp/modulix.spec.out; ./packaging/rpm/build-srpm.sh --version 0.1.0 --release 1'
+  quay.io/l-it/ee-wunder-devtools-ubi9:v1.8.1 \
+  bash -lc 'set -euo pipefail; tmpdir=$(mktemp -d); cp -a /workspace/. "$tmpdir"/; cd "$tmpdir"; rpmspec -P packaging/rpm/modulix-automation-runtime.spec >/tmp/modulix.spec.out; ./packaging/rpm/build-srpm.sh --version 0.1.0 --release 1; cp -f packaging/rpm/dist/*.src.rpm /workspace/packaging/rpm/dist/'
 ```
 
 ## RPM validation fallback

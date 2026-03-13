@@ -23,7 +23,10 @@
     #       egress_zones: [wan]
     #       target: ACCEPT
     #       rich_rules:
-    #         - rule family=ipv4 source address=10.34.20.0/24 destination address=10.10.30.10 port port=443 protocol=tcp accept
+    #         - >-
+    #           rule family=ipv4 source address=10.34.20.0/24
+    #           destination address=10.10.30.10 port port=443
+    #           protocol=tcp accept
     firewall_policy_defaults:
       zone_forwards:
         - zone: lan
