@@ -33,3 +33,8 @@
     # XRDP server (RDP)
     - role: lit.rhel.xrdp
       tags: [xrdp]
+
+    # Optional Cloudflare Zero Trust client for private/admin connectivity.
+    # Inventory controls whether a given workbench enrolls and connects.
+    - role: lit.supplementary.cloudflare_warp
+      tags: [cloudflare, warp, networking]

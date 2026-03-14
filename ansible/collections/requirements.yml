@@ -3,7 +3,7 @@ collections:
   - name: ansible.posix
     version: "2.1.0"
   - name: community.vmware
-    version: "6.2.0"
+    version: "5.10.0"
   - name: community.crypto
     version: "3.1.1"
   - name: community.hashi_vault
