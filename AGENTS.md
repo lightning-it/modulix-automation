@@ -1,5 +1,14 @@
 # Agent Instructions
 
+## Dependency version policy
+
+- Use fixed package versions only. Do not introduce open-ended or floating
+  version ranges such as `>=`, `<=`, `~=` , `^`, or `latest` unless the user
+  explicitly asks for that behavior.
+- Manage package version updates via Renovate whenever possible.
+- When adding or changing a package version, prefer wiring it into existing
+  Renovate management instead of maintaining it manually.
+
 ## Mandatory validation gate (containerized)
 
 Before finishing any change in this repository, run a full validation pass in
