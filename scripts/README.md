@@ -51,7 +51,7 @@ podman run --rm \
   -e GIT_CONFIG_COUNT=1 \
   -e GIT_CONFIG_KEY_0=safe.directory \
   -e GIT_CONFIG_VALUE_0="$REPO" \
-  quay.io/l-it/ee-wunder-devtools-ubi9:v1.8.1 \
+  quay.io/l-it/ee-wunder-devtools-ubi9:v1.8.2 \
   pre-commit run --all-files
 ```
 
