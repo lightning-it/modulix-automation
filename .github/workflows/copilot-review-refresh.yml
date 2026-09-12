@@ -846,6 +846,8 @@ jobs:
                   jq -e --arg head "${HEAD_SHA}" --arg review_id "${review_id}" '
                     [add[]? | select(.node_id == $review_id)] as $reviews |
                     ($reviews | length) == 1 and $reviews[0].commit_id == $head
+                    and ($reviews[0] | has("body"))
+                    and ($reviews[0].body == null or ($reviews[0].body | type) == "string")
                     and ($reviews[0].user.login == "copilot-pull-request-reviewer"
                       or $reviews[0].user.login == "copilot-pull-request-reviewer[bot]")
                     and ($reviews[0].state == "COMMENTED" or $reviews[0].state == "APPROVED")
@@ -856,6 +858,8 @@ jobs:
                       select(.user.login == "copilot-pull-request-reviewer"
                         or .user.login == "copilot-pull-request-reviewer[bot]")] as $reviews |
                     ($reviews | length) == 1
+                    and ($reviews[0] | has("body"))
+                    and ($reviews[0].body == null or ($reviews[0].body | type) == "string")
                     and ($reviews[0].state == "COMMENTED" or $reviews[0].state == "APPROVED")
                   ' <<<"${review_pages}" >/dev/null || return 1
                 fi
@@ -1400,9 +1404,18 @@ jobs:
           ' <<<"${current_default}" >/dev/null
           current_review="$(gh api \
             "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}")"
-          test "$(jq -er .commit_id <<<"${current_review}")" = "${HEAD_SHA}"
-          test "$(jq -er .submitted_at <<<"${current_review}")" = \
-            "${REVIEW_SUBMITTED_AT}"
+          jq -e --arg head "${HEAD_SHA}" --arg submitted "${REVIEW_SUBMITTED_AT}" \
+            --argjson review_id "${REVIEW_ID}" '
+            .id == $review_id
+            and has("body")
+            and (.body == null or (.body | type) == "string")
+            and .commit_id == $head
+            and .submitted_at == $submitted
+            and (.user.login == "copilot-pull-request-reviewer"
+              or .user.login == "copilot-pull-request-reviewer[bot]")
+            and .user.type == "Bot"
+            and (.state == "COMMENTED" or .state == "APPROVED")
+          ' <<<"${current_review}" >/dev/null
           if [ "${EVIDENCE_COMMENT_ID}" -gt 0 ] \
             && ! has_live_write_permission "${EVIDENCE_COMMENT_AUTHOR}"; then
             echo "Evidence reply author lost current write permission before verifier rerun." >&2
