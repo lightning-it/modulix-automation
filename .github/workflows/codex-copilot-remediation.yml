@@ -245,7 +245,7 @@ jobs:
             echo "Copilot review body is malformed; remediation is forbidden." >&2
             exit 1
           fi
-          if [[ "${review_body}" == *"unabletoreview"* || "${review_body}" == *"notabletoreview"* || "${review_body}" == *"quotaexhausted"* || "${review_body}" == *"quotaexceeded"* || "${review_body}" == *"encounteredanerror"* || "${review_body}" == *"suppressedcomments"* ]]; then
+          if [[ "${review_body}" == *"unabletoreview"* || "${review_body}" == *"notabletoreview"* || "${review_body}" == *"premiumrequestquota"* || "${review_body}" == *"premiumrequestsquota"* || "${review_body}" == *"quotaexhausted"* || "${review_body}" == *"quotaexceeded"* || "${review_body}" == *"encounteredanerror"* || "${review_body}" == *"suppressedcomment"* || "${review_body}" == *"suppressedcomments"* ]]; then
             echo "Copilot review is unavailable or quota-blocked; automatic retry is forbidden."
             exit 0
           fi
@@ -255,7 +255,7 @@ jobs:
 
           read -r owner name <<<"${REPOSITORY//\// }"
           # shellcheck disable=SC2016 # GraphQL variables are intentionally literal.
-          query='query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){number headRefOid reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:100){pageInfo{hasNextPage} nodes{author{login} body pullRequestReview{commit{oid}}}}}}}}}'
+          query='query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:100){pageInfo{hasNextPage} nodes{author{login} body pullRequestReview{commit{oid}}}}}}}}}'
           threads='[]'
           after=''
           seen_thread_cursors='[]'
@@ -263,18 +263,13 @@ jobs:
             args=(-f query="${query}" -F owner="${owner}" -F name="${name}" -F number="${pr_number}")
             if [ -n "${after}" ]; then args+=(-f after="${after}"); fi
             page="$(gh api graphql "${args[@]}")"
-            if ! jq -e --arg after "${after}" --arg head "${head_sha}" --argjson number "${pr_number}" '
+            if ! jq -e --arg head "${head_sha}" '
               (if has("errors") then ((.errors | type) == "array" and (.errors | length) == 0) else true end)
-              and
-              .data.repository.pullRequest.number == $number
               and
               .data.repository.pullRequest.headRefOid == $head
               and
               (.data.repository.pullRequest.reviewThreads | type) == "object"
               and (.data.repository.pullRequest.reviewThreads.nodes | type) == "array"
-              and (($after == ""
-                  and .data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage == false)
-                or (.data.repository.pullRequest.reviewThreads.nodes | length) > 0)
               and (.data.repository.pullRequest.reviewThreads.pageInfo | type) == "object"
               and ((.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage | type) == "boolean")
               and (
