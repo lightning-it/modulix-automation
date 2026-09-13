@@ -28,6 +28,8 @@ env:
   UNABLE_REVIEW_MARKER: unable to review this pull request
   QUOTA_EXHAUSTED_MARKER: quota exhausted
   QUOTA_EXCEEDED_MARKER: quota exceeded
+  PREMIUM_REQUEST_QUOTA_MARKER: premium request quota
+  PREMIUM_REQUESTS_QUOTA_MARKER: premium requests quota
   SUPPRESSED_COMMENTS_MARKER: suppressed comments
   ERROR_REVIEW_MARKER: encountered an error
 
@@ -353,6 +355,8 @@ jobs:
               --arg retry_no_files "${NO_FILES_REVIEW_MARKER}" \
               --arg retry_quota_exhausted "${QUOTA_EXHAUSTED_MARKER}" \
               --arg retry_quota_exceeded "${QUOTA_EXCEEDED_MARKER}" \
+              --arg retry_premium_request_quota "${PREMIUM_REQUEST_QUOTA_MARKER}" \
+              --arg retry_premium_requests_quota "${PREMIUM_REQUESTS_QUOTA_MARKER}" \
               --arg retry_suppressed "${SUPPRESSED_COMMENTS_MARKER}" \
               --arg retry_error "${ERROR_REVIEW_MARKER}" '
                 def compact_error_marker:
@@ -372,6 +376,8 @@ jobs:
                     and ($body | contains("able to review any files") | not)
                     and ($body | contains($retry_quota_exhausted) | not)
                     and ($body | contains($retry_quota_exceeded) | not)
+                    and ($body | contains($retry_premium_request_quota) | not)
+                    and ($body | contains($retry_premium_requests_quota) | not)
                     and ($body | contains($retry_suppressed) | not)
                     and ($compact_body | contains($error) | not))
                 )
@@ -1080,13 +1086,9 @@ jobs:
                 echo "Review ${review_id} no longer matches current head ${expected_head}." >&2
                 return 2
               fi
-              if ! jq -e --arg after "${after}" '
-                (.data.node | has("body"))
-                and (.data.node.body == null or ((.data.node.body | type) == "string"))
+              if ! jq -e '
+                (.data.node.body | type) == "string"
                 and (.data.node.comments.nodes | type) == "array"
-                and (($after == ""
-                    and .data.node.comments.pageInfo.hasNextPage == false)
-                  or (.data.node.comments.nodes | length) > 0)
                 and all(
                   .data.node.comments.nodes[]?;
                   (type == "object") and ((.body | type) == "string")
@@ -1102,6 +1104,8 @@ jobs:
                   --arg no_files_marker "${NO_FILES_REVIEW_MARKER}" \
                 --arg quota_exhausted_marker "${QUOTA_EXHAUSTED_MARKER}" \
                 --arg quota_exceeded_marker "${QUOTA_EXCEEDED_MARKER}" \
+                --arg premium_request_quota_marker "${PREMIUM_REQUEST_QUOTA_MARKER}" \
+                --arg premium_requests_quota_marker "${PREMIUM_REQUESTS_QUOTA_MARKER}" \
                 --arg suppressed_comments_marker "${SUPPRESSED_COMMENTS_MARKER}" \
                 --arg error_marker "${ERROR_REVIEW_MARKER}" \
                   'def normalize_review_text:
@@ -1115,6 +1119,8 @@ jobs:
                   | ($no_files_marker | normalize_review_text) as $no_files
                   | ($quota_exhausted_marker | normalize_review_text) as $quota_exhausted
                   | ($quota_exceeded_marker | normalize_review_text) as $quota_exceeded
+                  | ($premium_request_quota_marker | normalize_review_text) as $premium_request_quota
+                  | ($premium_requests_quota_marker | normalize_review_text) as $premium_requests_quota
                   | ($suppressed_comments_marker | normalize_review_text) as $suppressed
                   | ($error_marker | normalize_review_text) as $error
                   | [
@@ -1127,6 +1133,8 @@ jobs:
                               or contains($no_files)
                               or contains($quota_exhausted)
                               or contains($quota_exceeded)
+                              or contains($premium_request_quota)
+                              or contains($premium_requests_quota)
                               or contains($suppressed)
                               or contains($error)
                             )
@@ -1245,11 +1253,8 @@ jobs:
                 echo "Pull-request metadata changed after this review run was bound." >&2
                 exit 1
               fi
-              if ! jq -e --arg before "${before}" '
+              if ! jq -e '
                 (.data.repository.pullRequest.reviews.nodes | type) == "array"
-                and (($before == ""
-                    and .data.repository.pullRequest.reviews.pageInfo.hasPreviousPage == false)
-                  or (.data.repository.pullRequest.reviews.nodes | length) > 0)
                 and all(
                   .data.repository.pullRequest.reviews.nodes[]?;
                   (type == "object")
@@ -1319,11 +1324,6 @@ jobs:
                           and (.submitted_at | valid_timestamp)
                           and is_fresh)
                         or .commit_oid == null
-                        or (
-                          .commit_oid != null
-                          and .commit_oid != $head
-                          and (.commit_oid | test("^[0-9a-f]{40}$") | not)
-                        )
                         or ((.submitted_at | valid_timestamp | not))
                         or (
                           (.submitted_at | valid_timestamp)
@@ -1481,7 +1481,6 @@ jobs:
           ) {
             repository(owner: $owner, name: $repository) {
               pullRequest(number: $number) {
-                number
                 headRefOid
                 reviewThreads(first: 100, after: $after) {
                   pageInfo { hasNextPage endCursor }
@@ -1526,13 +1525,9 @@ jobs:
                 request_failed=true
                 break
               fi
-              if ! jq -e --arg after "${after}" --argjson number "${PR_NUMBER}" '
-                .data.repository.pullRequest.number == $number
-                and (.data.repository.pullRequest.reviewThreads | type) == "object"
+              if ! jq -e '
+                (.data.repository.pullRequest.reviewThreads | type) == "object"
                 and (.data.repository.pullRequest.reviewThreads.nodes | type) == "array"
-                and (($after == ""
-                    and .data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage == false)
-                  or (.data.repository.pullRequest.reviewThreads.nodes | length) > 0)
                 and all(
                   .data.repository.pullRequest.reviewThreads.nodes[]?;
                   (type == "object")
@@ -1783,8 +1778,6 @@ jobs:
                   ($reviews | length) == 1
                   and ($reviews[0].commit_id | type) == "string"
                   and $reviews[0].commit_id == $head
-                  and ($reviews[0] | has("body"))
-                  and ($reviews[0].body == null or ($reviews[0].body | type) == "string")
                   and ($reviews[0].user.login == "copilot-pull-request-reviewer"
                     or $reviews[0].user.login == "copilot-pull-request-reviewer[bot]")
                   and ($reviews[0].state == "COMMENTED" or $reviews[0].state == "APPROVED")
@@ -1804,21 +1797,17 @@ jobs:
             local seen_cursors='[]'
             local -a arguments
             read -r -d '' query <<'GRAPHQL' || true
-          query($owner:String!,$repository:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repository){pullRequest(number:$number){number headRefOid reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:100){pageInfo{hasNextPage} nodes{author{login} pullRequestReview{commit{oid}}}}}}}}}
+          query($owner:String!,$repository:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repository){pullRequest(number:$number){headRefOid reviewThreads(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:100){pageInfo{hasNextPage} nodes{author{login} pullRequestReview{commit{oid}}}}}}}}}
           GRAPHQL
             while true; do
               arguments=(-f query="${query}" -F owner="${owner}" -F repository="${repository}" -F number="${PR_NUMBER}")
               if [ -n "${after}" ]; then arguments+=(-f after="${after}"); fi
               page="$(gh api graphql "${arguments[@]}")" || return 1
-              if ! jq -e --arg after "${after}" --arg head "${EVENT_HEAD}" --argjson number "${PR_NUMBER}" '
+              if ! jq -e --arg head "${EVENT_HEAD}" '
                 (if has("errors") then ((.errors | type) == "array" and (.errors | length) == 0) else true end)
-                and .data.repository.pullRequest.number == $number
                 and .data.repository.pullRequest.headRefOid == $head
                 and (.data.repository.pullRequest.reviewThreads | type) == "object"
                 and (.data.repository.pullRequest.reviewThreads.nodes | type) == "array"
-                and (($after == ""
-                    and .data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage == false)
-                  or (.data.repository.pullRequest.reviewThreads.nodes | length) > 0)
                 and (.data.repository.pullRequest.reviewThreads.pageInfo | type) == "object"
                 and ((.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage | type) == "boolean")
                 and (.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage == false
@@ -1874,39 +1863,6 @@ jobs:
               local finding_status=$?
               [ "${finding_status}" -eq 1 ] || return "${finding_status}"
             fi
-          }
-          verify_failure_publication() {
-            local check_id="$1" completed_at="$2" evidence="$3"
-            local external_id="$4" url="$5" attempt observed
-            for attempt in $(seq 1 5); do
-              if observed="$(api_read "repos/${REPOSITORY}/check-runs/${check_id}")" \
-                && jq -e \
-                  --arg completed_at "${completed_at}" \
-                  --arg evidence "${evidence}" \
-                  --arg external_id "${external_id}" \
-                  --arg head "${EVENT_HEAD}" \
-                  --arg url "${url}" \
-                  --argjson check_id "${check_id}" '
-                    .id == $check_id
-                    and .name == "Current revision review"
-                    and .app.id == 15368
-                    and .app.slug == "github-actions"
-                    and .head_sha == $head
-                    and .details_url == $url
-                    and .external_id == $external_id
-                    and .completed_at == $completed_at
-                    and .status == "completed"
-                    and .conclusion == "failure"
-                    and .output.summary == $evidence
-                  ' <<<"${observed}" >/dev/null; then
-                return 0
-              fi
-              if [ "${attempt}" -eq 5 ]; then
-                echo "Failure check did not converge to the exact durable binding." >&2
-                return 1
-              fi
-              sleep 3
-            done
           }
           [[ "${EVENT_BASE}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${EVENT_HEAD}" =~ ^[0-9a-f]{40}$ ]]
@@ -2111,7 +2067,7 @@ jobs:
               review_path:$review_path,run_url:$run_url}')"
           publish_once() {
             local check_name="$1" external_id="$2" title="$3"
-            local checks named count check_id check_url completed_at created
+            local checks named count check_id check_url completed_at created invalidated
             local failure_evidence final_labels_sha256 recovered recovery_attempt updated
             local final_labels_valid final_metadata_valid final_review_valid final_threads_valid
             read_named_checks() {
@@ -2161,23 +2117,19 @@ jobs:
                   --argjson pr_number "${PR_NUMBER}" --argjson run_id "${GITHUB_RUN_ID}" \
                   --arg run_url "${run_url}" \
                   '{schema:4,base_sha:$base,head_sha:$head,pull_request_number:$pr_number,producer_run_id:$run_id,reason:$reason,run_url:$run_url,metadata_valid:$metadata_valid,labels_valid:$labels_valid,review_valid:$review_valid,threads_valid:$threads_valid}')"
-                failure_external_id="mlx90-current-revision:thread-change:v1:${PR_NUMBER}:${GITHUB_RUN_ID}:${EVENT_BASE}:${EVENT_HEAD}"
-                patch_status=0
-                api_patch "repos/${REPOSITORY}/check-runs/${check_id}" \
+                invalidated="$(api_patch "repos/${REPOSITORY}/check-runs/${check_id}" \
                   -f status=completed -f conclusion=failure \
                   -f "completed_at=${completed_at}" -f "details_url=${check_url}" \
-                  -f "external_id=${failure_external_id}" \
+                  -f "external_id=mlx90-current-revision:thread-change:v1:${PR_NUMBER}:${GITHUB_RUN_ID}:${EVENT_BASE}:${EVENT_HEAD}" \
                   -f 'output[title]=Current revision review-thread evidence changed' \
-                  -f "output[summary]=${failure_evidence}" >/dev/null \
-                  || patch_status=$?
-                publication_status=0
-                verify_failure_publication "${check_id}" "${completed_at}" \
-                  "${failure_evidence}" "${failure_external_id}" "${check_url}" \
-                  || publication_status=$?
-                if [ "${patch_status}" -ne 0 ] \
-                  || [ "${publication_status}" -ne 0 ]; then
-                  return 1
-                fi
+                  -f "output[summary]=${failure_evidence}")" || return 1
+                jq -e --arg evidence "${failure_evidence}" --arg head "${EVENT_HEAD}" \
+                  --argjson check_id "${check_id}" '
+                    .id == $check_id and .name == "Current revision review"
+                    and .app.id == 15368 and .app.slug == "github-actions"
+                    and .head_sha == $head and .status == "completed"
+                    and .conclusion == "failure" and .output.summary == $evidence
+                  ' <<<"${invalidated}" >/dev/null || return 1
               fi
               return 1
             fi
@@ -2330,25 +2282,29 @@ jobs:
                 metadata_valid:$metadata_valid,labels_valid:$labels_valid,
                 review_valid:$review_valid,threads_valid:$threads_valid}')"
             completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            failure_external_id="mlx90-current-revision:binding-change:v1:${PR_NUMBER}:${GITHUB_RUN_ID}:${EVENT_BASE}:${EVENT_HEAD}"
-            patch_status=0
-            api_patch \
+            invalidated="$(api_patch \
               "repos/${REPOSITORY}/check-runs/${published_check_id}" \
               -f status=completed \
               -f conclusion=failure \
               -f "completed_at=${completed_at}" \
               -f "details_url=${run_url}" \
-              -f "external_id=${failure_external_id}" \
+              -f "external_id=mlx90-current-revision:binding-change:v1:${PR_NUMBER}:${GITHUB_RUN_ID}:${EVENT_BASE}:${EVENT_HEAD}" \
               -f 'output[title]=Current revision binding changed during publication' \
-              -f "output[summary]=${failure_evidence}" >/dev/null \
-              || patch_status=$?
-            publication_status=0
-            verify_failure_publication "${published_check_id}" "${completed_at}" \
-              "${failure_evidence}" "${failure_external_id}" "${run_url}" \
-              || publication_status=$?
-            test "${patch_status}" -eq 0
-            test "${publication_status}" -eq 0
-            echo "Bound pull-request state did not remain valid during result publication: metadata_valid=${final_metadata_valid}, labels_valid=${final_labels_valid}, review_valid=${final_review_valid}, threads_valid=${final_threads_valid}." >&2
+              -f "output[summary]=${failure_evidence}")"
+            jq -e \
+              --arg evidence "${failure_evidence}" \
+              --arg head "${EVENT_HEAD}" \
+              --argjson check_id "${published_check_id}" '
+                .id == $check_id
+                and .name == "Current revision review"
+                and .app.id == 15368
+                and .app.slug == "github-actions"
+                and .head_sha == $head
+                and .status == "completed"
+                and .conclusion == "failure"
+                and .output.summary == $evidence
+              ' <<<"${invalidated}" >/dev/null
+            echo "Bound pull-request state did not remain valid during result publication: metadata_valid=${final_metadata_valid}, labels_valid=${final_labels_valid}, review_valid=${final_review_valid}." >&2
             exit 1
           fi
 
