@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 10
     container:
       image: >-
-        quay.io/l-it/ee-wunder-devtools-ubi9@sha256:82e9586f082f8818aba9e8c12b4cab696dda31b025bf561e7e9fdfd1037e7d25
+        quay.io/l-it/ee-wunder-devtools-ubi9@sha256:b32a72938fb60d535719a27cba39f56dd6e87ff8ac03add8d149e6a654bd63d5
       options: --user 0:0
     permissions:
       contents: read
