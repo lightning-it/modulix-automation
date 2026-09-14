@@ -46,7 +46,10 @@ env:
 
 jobs:
   continue-after-push:
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.actor == 'github-actions[bot]' &&
+      github.triggering_actor == 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -58,6 +61,8 @@ jobs:
         env:
           CONTROLLER_REF: ${{ github.workflow_ref }}
           CONTROLLER_SHA: ${{ github.workflow_sha }}
+          EVENT_ACTOR: ${{ github.actor }}
+          EVENT_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
           EXPECTED_HEAD: ${{ inputs.expected_head }}
@@ -66,6 +71,8 @@ jobs:
         run: |
           set -euo pipefail
           test "${GITHUB_REPOSITORY_OWNER}" = lightning-it
+          test "${EVENT_ACTOR}" = 'github-actions[bot]'
+          test "${EVENT_TRIGGERING_ACTOR}" = 'github-actions[bot]'
           test "${ROUND}" = 1
           pr="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}")"
           test "$(jq -r .state <<<"${pr}")" = open
