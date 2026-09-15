@@ -1,10 +1,14 @@
 ---
-- name: Setup squid proxy
-  hosts: proxy
+- name: Configure the standard LIT forward proxy
+  hosts: forward_proxies
+  become: true
   gather_facts: true
+  any_errors_fatal: true
+  serial: 1
   roles:
-    - name: Execute role squid
-      role: squid
+    - name: Configure the closed forward proxy
+      role: lit.ubuntu.forward_proxy
+      forward_proxy_enabled: true
       tags:
-        - squid
+        - forward_proxy
 ...
