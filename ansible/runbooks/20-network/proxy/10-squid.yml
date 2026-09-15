@@ -6,9 +6,14 @@
   any_errors_fatal: true
   serial: 1
   roles:
-    - name: Configure the closed forward proxy
-      role: lit.ubuntu.forward_proxy
+    - name: Run the distribution-neutral closed forward proxy service
+      role: lit.supplementary.forward_proxy
       forward_proxy_enabled: true
+      tags:
+        - forward_proxy
+    - name: Configure Ubuntu forward proxy clients
+      role: lit.ubuntu.forward_proxy_client
+      forward_proxy_client_enabled: true
       tags:
         - forward_proxy
 ...

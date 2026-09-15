@@ -19,7 +19,7 @@ RUNBOOKS = (
 
 
 class ForwardProxyOrchestrationTests(unittest.TestCase):
-    """Prevent a return to the missing, unqualified Squid role stub."""
+    """Keep the portable service and Ubuntu client adapter ordered together."""
 
     def test_all_proxy_entrypoints_use_the_same_protected_role(self):
         for path in RUNBOOKS:
@@ -29,10 +29,12 @@ class ForwardProxyOrchestrationTests(unittest.TestCase):
                 self.assertIs(play["become"], True)
                 self.assertIs(play["any_errors_fatal"], True)
                 self.assertEqual(play["serial"], 1)
-                self.assertEqual(len(play["roles"]), 1)
-                role = play["roles"][0]
-                self.assertEqual(role["role"], "lit.ubuntu.forward_proxy")
-                self.assertIs(role["forward_proxy_enabled"], True)
+                self.assertEqual(len(play["roles"]), 2)
+                service_role, client_role = play["roles"]
+                self.assertEqual(service_role["role"], "lit.supplementary.forward_proxy")
+                self.assertIs(service_role["forward_proxy_enabled"], True)
+                self.assertEqual(client_role["role"], "lit.ubuntu.forward_proxy_client")
+                self.assertIs(client_role["forward_proxy_client_enabled"], True)
 
     def test_unqualified_squid_role_is_absent(self):
         for path in RUNBOOKS:
