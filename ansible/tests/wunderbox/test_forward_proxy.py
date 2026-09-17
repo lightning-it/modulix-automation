@@ -29,6 +29,23 @@ class ForwardProxyOrchestrationTests(unittest.TestCase):
                 self.assertIs(play["become"], True)
                 self.assertIs(play["any_errors_fatal"], True)
                 self.assertEqual(play["serial"], 1)
+                self.assertEqual(len(play["pre_tasks"]), 2)
+                guard, plan_stop = play["pre_tasks"]
+                assertions = guard["ansible.builtin.assert"]["that"]
+                self.assertIn("ansible_limit is defined", assertions)
+                self.assertIn(
+                    "ansible_limit | string | trim == inventory_hostname",
+                    assertions,
+                )
+                self.assertIn("ansible_play_hosts_all | length == 1", assertions)
+                self.assertIn(
+                    "ansible_play_hosts_all == [inventory_hostname]", assertions
+                )
+                self.assertEqual(plan_stop["ansible.builtin.meta"], "end_play")
+                self.assertEqual(
+                    plan_stop["when"],
+                    "forward_proxy_orchestration_action | default('plan') == 'plan'",
+                )
                 self.assertEqual(len(play["roles"]), 2)
                 service_role, client_role = play["roles"]
                 self.assertEqual(service_role["role"], "lit.supplementary.forward_proxy")
