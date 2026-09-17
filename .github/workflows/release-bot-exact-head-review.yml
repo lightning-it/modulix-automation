@@ -93,8 +93,11 @@ jobs:
         run: |
           set -euo pipefail
           [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${BASE_REF}" =~ ^(develop|main)$ ]]
           [[ "${DISPATCH_BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${TRUSTED_WORKFLOW_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          test "${DISPATCH_REF}" = "refs/heads/${BASE_REF}"
+          test "${GITHUB_REF_PROTECTED}" = true
           test "${DISPATCH_BASE_SHA}" = "${EXPECTED_BASE}"
           test "${TRUSTED_WORKFLOW_SHA}" = "${EXPECTED_BASE}"
           test "${TRUSTED_WORKFLOW_SHA}" = "${DISPATCH_BASE_SHA}"
