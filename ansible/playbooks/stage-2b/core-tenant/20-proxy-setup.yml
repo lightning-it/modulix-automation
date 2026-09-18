@@ -1,10 +1,42 @@
 ---
-- name: Setup squid proxy
-  hosts: proxy
+- name: Configure the standard LIT forward proxy
+  hosts: forward_proxies
+  become: true
   gather_facts: true
+  any_errors_fatal: true
+  serial: 1
+  pre_tasks:
+    - name: Require an explicit single-host proxy execution boundary
+      ansible.builtin.assert:
+        that:
+          - >-
+            forward_proxy_orchestration_action | default('plan')
+            in ['plan', 'apply']
+          - ansible_limit is defined
+          - ansible_limit | string | trim == inventory_hostname
+          - ansible_play_hosts_all | length == 1
+          - ansible_play_hosts_all == [inventory_hostname]
+        fail_msg: >-
+          Forward-proxy execution requires one exact inventory FQDN limit and
+          an explicit action of plan or apply.
+        quiet: true
+      changed_when: false
+      tags: [always]
+
+    - name: End after the read-only proxy plan
+      ansible.builtin.meta: end_play
+      when: forward_proxy_orchestration_action | default('plan') == 'plan'
+      tags: [always]
+
   roles:
-    - name: Execute role squid
-      role: squid
+    - name: Run the distribution-neutral closed forward proxy service
+      role: lit.supplementary.forward_proxy
+      forward_proxy_enabled: true
       tags:
-        - squid
+        - forward_proxy
+    - name: Configure Ubuntu forward proxy clients
+      role: lit.ubuntu.forward_proxy_client
+      forward_proxy_client_enabled: true
+      tags:
+        - forward_proxy
 ...
