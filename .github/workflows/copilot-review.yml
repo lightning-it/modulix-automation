@@ -1273,35 +1273,7 @@ jobs:
 
               page_candidates="$(
                 jq -cer \
-                  --arg head "${head_sha}" \
-                  --arg last_edited_at "${BOUND_LAST_EDITED_AT}" \
-                  --arg not_before "${FRESH_REVIEW_AFTER}" \
-                  --arg reviewer "${COPILOT_REVIEWER_LOGIN}" \
-                  --arg require_fresh "${REQUIRE_FRESH_REVIEW}" \
-                  'def timestamp_key:
-                      if type != "string" then error("invalid timestamp")
-                      else
-                        capture("^(?<datetime>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\.(?<fraction>[0-9]{1,9}))?Z$") as $parts
-                        | ($parts.datetime + "Z") as $canonical
-                        | ($canonical | strptime("%Y-%m-%dT%H:%M:%SZ") | mktime) as $seconds
-                        | if ($seconds | gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")) != $canonical
-                          then error("invalid timestamp")
-                          else [
-                            $seconds,
-                            ((($parts.fraction // "") + "000000000") | .[0:9] | tonumber)
-                          ]
-                          end
-                      end;
-                  def valid_timestamp:
-                      (try (timestamp_key | true) catch false) // false;
-                  def freshness_required:
-                      $last_edited_at != "null" or $require_fresh == "true";
-                  def is_fresh:
-                      (.submitted_at | timestamp_key) as $submitted
-                      | (if $last_edited_at == "null" then true
-                         else $submitted > ($last_edited_at | timestamp_key)
-                         end)
-                      and ($require_fresh != "true" or $submitted > ($not_before | timestamp_key));
+                  --arg reviewer "${COPILOT_REVIEWER_LOGIN}" '
                   [ (.data.repository.pullRequest.reviews.nodes // [])[]?
                     | select(
                         .author.login as $login
@@ -1316,26 +1288,16 @@ jobs:
                           then .commit.oid else null end
                         ),
                         submitted_at: (.submittedAt // null)
-                      }
-                    # Historical reviews for an older head do not affect this
-                    # current-revision decision. A missing binding or a newer
-                    # mismatched binding is never silently ignored.
-                    | select(
-                        ((.commit_oid == $head)
-                          and (.submitted_at | valid_timestamp)
-                          and is_fresh)
-                        or .commit_oid == null
-                        or ((.submitted_at | valid_timestamp | not))
-                        or (
-                          (.submitted_at | valid_timestamp)
-                          and freshness_required
-                          and (.commit_oid != $head)
-                          and is_fresh
-                        )
-                      ) ]' <<<"${response}"
+                      } ]' <<<"${response}"
               )"
-              candidate_reviews="$(jq -cer --argjson existing "${candidate_reviews}" \
-                '$existing + .' <<<"${page_candidates}")" || {
+              candidate_reviews="$(
+                printf '%s\n%s\n' "${candidate_reviews}" "${page_candidates}" \
+                  | jq -cse '
+                      if length == 2 and all(.[]; type == "array")
+                      then .[0] + .[1]
+                      else error("invalid candidate pages")
+                      end'
+              )" || {
                 echo "Unable to collect Copilot review bindings; refusing to accept the review." >&2
                 exit 1
               }
@@ -1413,21 +1375,50 @@ jobs:
                         ]
                         end
                     end;
+                  def valid_timestamp:
+                    (try (timestamp_key | true) catch false) // false;
+                  def valid_review_id:
+                    if type != "string" then false
+                    else test("^[A-Za-z0-9_+/=-]+$")
+                    end;
+                  def is_eligible_current:
+                    (.submitted_at | timestamp_key) as $submitted
+                    | (if $last_edited_at == "null" then true
+                       else $submitted > ($last_edited_at | timestamp_key)
+                       end)
+                    and ($require_fresh != "true" or $submitted > ($not_before | timestamp_key));
                   if length == 0 then {status:"waiting"}
-                  elif length != 1 then {status:"terminal", reason:"ambiguous Copilot reviews"}
-                  elif (.[0].id | type) != "string" or (.[0].id | length) == 0
+                  elif any(.[]; (.id | valid_review_id | not))
                     then {status:"terminal", reason:"missing review identity"}
-                  elif .[0].commit_oid != $head
+                  elif any(
+                    .[];
+                    ((.commit_oid | type) != "string")
+                    or (.commit_oid | test("^[0-9a-f]{40}$") | not)
+                  )
                     then {status:"terminal", reason:"missing or mismatched GraphQL commit OID"}
-                  elif (((try (.[0].submitted_at | timestamp_key | true) catch false) // false) | not)
+                  elif any(.[]; (.submitted_at | valid_timestamp | not))
                     then {status:"terminal", reason:"missing or invalid review submission time"}
-                  elif (if $last_edited_at == "null" then false
-                        else (.[0].submitted_at | timestamp_key) <= ($last_edited_at | timestamp_key)
-                        end)
-                    then {status:"terminal", reason:"stale Copilot review"}
-                  elif ($require_fresh == "true" and (.[0].submitted_at | timestamp_key) <= ($not_before | timestamp_key))
-                    then {status:"terminal", reason:"stale Copilot review"}
-                  else {status:"candidate", id:.[0].id}
+                  else
+                    [ .[] | select(.commit_oid == $head) ] as $current
+                    # A metadata edit intentionally makes earlier, well-formed
+                    # reviews non-authorizing while a replacement review is in
+                    # flight. Validate the full history above, then count only
+                    # reviews that satisfy the bound freshness contract.
+                    | [
+                        $current[] | select(is_eligible_current)
+                      ] as $eligible_current
+                    | [ .[] | select(.commit_oid != $head) ] as $mismatched
+                    | if ($eligible_current | length) == 0
+                      then {status:"waiting"}
+                      elif ($eligible_current | length) != 1
+                        then {status:"terminal", reason:"ambiguous Copilot reviews"}
+                      elif any(
+                        $mismatched[];
+                        (.submitted_at | timestamp_key) >= ($eligible_current[0].submitted_at | timestamp_key)
+                      )
+                        then {status:"terminal", reason:"missing or mismatched GraphQL commit OID"}
+                      else {status:"candidate", id:$eligible_current[0].id}
+                      end
                   end' <<<"${candidate_reviews}"
             )" || {
               echo "Unable to classify Copilot review bindings; refusing to accept the review." >&2
