@@ -24,7 +24,37 @@ class ForwardProxyOrchestrationTests(unittest.TestCase):
     def test_all_proxy_entrypoints_use_the_same_protected_role(self):
         for path in RUNBOOKS:
             with self.subTest(path=path):
-                play = yaml.safe_load(path.read_text(encoding="utf-8"))[0]
+                plays = yaml.safe_load(path.read_text(encoding="utf-8"))
+                self.assertEqual(len(plays), 2)
+                preflight, play = plays
+                self.assertEqual(preflight["hosts"], "localhost")
+                self.assertEqual(preflight["connection"], "local")
+                self.assertIs(preflight["become"], False)
+                self.assertIs(preflight["gather_facts"], False)
+                self.assertIs(preflight["any_errors_fatal"], True)
+                self.assertEqual(len(preflight["tasks"]), 1)
+                preflight_assertions = preflight["tasks"][0][
+                    "ansible.builtin.assert"
+                ]["that"]
+                self.assertIn("forward_proxy_target_host is defined", preflight_assertions)
+                self.assertIn("ansible_limit is defined", preflight_assertions)
+                self.assertIn(
+                    "forward_proxy_limit_hosts | length == 2",
+                    preflight_assertions,
+                )
+                self.assertTrue(
+                    any(
+                        "in groups.get('forward_proxies', [])" in assertion
+                        for assertion in preflight_assertions
+                    )
+                )
+                self.assertTrue(
+                    any(
+                        "['localhost', forward_proxy_target_host_effective]"
+                        in assertion
+                        for assertion in preflight_assertions
+                    )
+                )
                 self.assertEqual(play["hosts"], "forward_proxies")
                 self.assertIs(play["become"], True)
                 self.assertIs(play["any_errors_fatal"], True)
@@ -33,9 +63,18 @@ class ForwardProxyOrchestrationTests(unittest.TestCase):
                 guard, plan_stop = play["pre_tasks"]
                 assertions = guard["ansible.builtin.assert"]["that"]
                 self.assertIn("ansible_limit is defined", assertions)
-                self.assertIn(
-                    "ansible_limit | string | trim == inventory_hostname",
-                    assertions,
+                self.assertTrue(
+                    any(
+                        "['localhost', inventory_hostname]" in assertion
+                        for assertion in assertions
+                    )
+                )
+                self.assertTrue(
+                    any(
+                        "forward_proxy_target_host" in assertion
+                        and "inventory_hostname" in assertion
+                        for assertion in assertions
+                    )
                 )
                 self.assertIn("ansible_play_hosts_all | length == 1", assertions)
                 self.assertIn(
