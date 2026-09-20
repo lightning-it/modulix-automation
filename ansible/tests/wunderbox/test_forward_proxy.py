@@ -94,6 +94,36 @@ class ForwardProxyOrchestrationTests(unittest.TestCase):
                 self.assertIs(service_role["forward_proxy_enabled"], True)
                 self.assertEqual(client_role["role"], "lit.ubuntu.forward_proxy_client")
                 self.assertIs(client_role["forward_proxy_client_enabled"], True)
+                for role in (service_role, client_role):
+                    role_conditions = role["when"]
+                    self.assertTrue(
+                        any(
+                            "forward_proxy_orchestration_action" in condition
+                            and "== 'apply'" in condition
+                            for condition in role_conditions
+                        )
+                    )
+                    self.assertTrue(
+                        any(
+                            "forward_proxy_target_host" in condition
+                            and "inventory_hostname" in condition
+                            for condition in role_conditions
+                        )
+                    )
+                    self.assertIn("ansible_limit is defined", role_conditions)
+                    self.assertTrue(
+                        any(
+                            "['localhost', inventory_hostname]" in condition
+                            for condition in role_conditions
+                        )
+                    )
+                    self.assertIn(
+                        "ansible_play_hosts_all | length == 1", role_conditions
+                    )
+                    self.assertIn(
+                        "ansible_play_hosts_all == [inventory_hostname]",
+                        role_conditions,
+                    )
 
     def test_unqualified_squid_role_is_absent(self):
         for path in RUNBOOKS:
