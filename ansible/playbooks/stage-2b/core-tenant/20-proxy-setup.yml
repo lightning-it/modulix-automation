@@ -1,10 +1,5 @@
 ---
-- name: Setup squid proxy
-  hosts: proxy
-  gather_facts: true
-  roles:
-    - name: Execute role squid
-      role: squid
-      tags:
-        - squid
+- name: Use the canonical forward-proxy orchestration
+  ansible.builtin.import_playbook: >-
+    ../../../runbooks/20-network/proxy/10-squid.yml
 ...
