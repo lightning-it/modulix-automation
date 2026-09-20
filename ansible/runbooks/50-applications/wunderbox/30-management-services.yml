@@ -167,14 +167,14 @@
               - {name: netbox_client_secret, length: 48}
           when: _wunderbox_management_selected in ['netbox', 'all']
           no_log: true
-          tags: [keycloak, netbox, sso]
+          tags: [netbox, sso]
 
         - name: Capture the NetBox OIDC client secret bundle
           ansible.builtin.set_fact:
             wunderbox_sso_secrets: "{{ vault_secret_bundle_result }}"
           when: _wunderbox_management_selected in ['netbox', 'all']
           no_log: true
-          tags: [keycloak, netbox, sso]
+          tags: [netbox, sso]
 
         - name: Deploy the Keycloak identity target
           ansible.builtin.include_role:
