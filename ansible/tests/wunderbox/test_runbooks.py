@@ -292,7 +292,9 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
                     lifecycle_tasks[name]["when"],
                     "_wunderbox_management_selected in ['netbox', 'all']",
                 )
-                self.assertEqual(lifecycle_tasks[name]["tags"], ["netbox", "sso"])
+                self.assertEqual(
+                    set(lifecycle_tasks[name]["tags"]), {"netbox", "sso"}
+                )
 
         self.assertNotIn(
             "_wunderbox_management_selected in ['keycloak', 'netbox', 'all']",
