@@ -157,7 +157,7 @@
           no_log: true
           tags: [keycloak]
 
-        - name: Resolve SSO client secrets from Vault
+        - name: Resolve NetBox OIDC client secret from Vault
           ansible.builtin.include_role:
             name: lit.supplementary.vault_secret_bundle
           vars:
@@ -165,14 +165,14 @@
             vault_secret_bundle_kv_path: "{{ wunderbox_management_vault_paths.sso }}"
             vault_secret_bundle_items:
               - {name: netbox_client_secret, length: 48}
-          when: _wunderbox_management_selected in ['keycloak', 'netbox', 'all']
+          when: _wunderbox_management_selected in ['netbox', 'all']
           no_log: true
           tags: [keycloak, netbox, sso]
 
-        - name: Capture the SSO client secret bundle
+        - name: Capture the NetBox OIDC client secret bundle
           ansible.builtin.set_fact:
             wunderbox_sso_secrets: "{{ vault_secret_bundle_result }}"
-          when: _wunderbox_management_selected in ['keycloak', 'netbox', 'all']
+          when: _wunderbox_management_selected in ['netbox', 'all']
           no_log: true
           tags: [keycloak, netbox, sso]
 
