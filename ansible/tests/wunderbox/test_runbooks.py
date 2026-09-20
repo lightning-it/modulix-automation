@@ -273,6 +273,36 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             include_path = task["ansible.builtin.include_tasks"]
             self.assertTrue((RUNBOOK_DIRECTORY / include_path).resolve().is_file())
 
+    def test_keycloak_target_does_not_resolve_disabled_netbox_secret(self):
+        runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
+        lifecycle = next(
+            task
+            for task in runbook["tasks"]
+            if task["name"]
+            == "Execute the management-service lifecycle through scoped Vault access"
+        )
+        lifecycle_tasks = {task["name"]: task for task in lifecycle["block"]}
+
+        for name in (
+            "Resolve NetBox OIDC client secret from Vault",
+            "Capture the NetBox OIDC client secret bundle",
+        ):
+            with self.subTest(task=name):
+                self.assertEqual(
+                    lifecycle_tasks[name]["when"],
+                    "_wunderbox_management_selected in ['netbox', 'all']",
+                )
+                self.assertEqual(
+                    set(lifecycle_tasks[name]["tags"]), {"netbox", "sso"}
+                )
+
+        self.assertNotIn(
+            "_wunderbox_management_selected in ['keycloak', 'netbox', 'all']",
+            (RUNBOOK_DIRECTORY / "30-management-services.yml").read_text(
+                encoding="utf-8"
+            ),
+        )
+
     def test_management_tls_custody_separates_issuer_and_kv_approles(self):
         path = RUNBOOK_DIRECTORY / "20-management-tls-custody.yml"
         play = load_yaml(path)[0]
