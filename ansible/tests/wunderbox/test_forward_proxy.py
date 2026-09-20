@@ -27,13 +27,16 @@ class ForwardProxyOrchestrationTests(unittest.TestCase):
                 plays = yaml.safe_load(path.read_text(encoding="utf-8"))
                 self.assertEqual(len(plays), 2)
                 preflight, play = plays
-                self.assertEqual(preflight["hosts"], "localhost")
+                self.assertEqual(preflight["hosts"], "all:localhost")
                 self.assertEqual(preflight["connection"], "local")
                 self.assertIs(preflight["become"], False)
                 self.assertIs(preflight["gather_facts"], False)
                 self.assertIs(preflight["any_errors_fatal"], True)
                 self.assertEqual(len(preflight["tasks"]), 1)
-                preflight_assertions = preflight["tasks"][0][
+                preflight_task = preflight["tasks"][0]
+                self.assertEqual(preflight_task["delegate_to"], "localhost")
+                self.assertIs(preflight_task["run_once"], True)
+                preflight_assertions = preflight_task[
                     "ansible.builtin.assert"
                 ]["that"]
                 self.assertIn("forward_proxy_target_host is defined", preflight_assertions)

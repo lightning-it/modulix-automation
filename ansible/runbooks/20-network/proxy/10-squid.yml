@@ -1,6 +1,6 @@
 ---
 - name: Validate one explicit forward-proxy target
-  hosts: localhost
+  hosts: "all:localhost"
   connection: local
   become: false
   gather_facts: false
@@ -44,6 +44,8 @@
           forward_proxies inventory group.
         quiet: true
       changed_when: false
+      delegate_to: localhost
+      run_once: true
       tags: [always]
 
 - name: Configure the standard LIT forward proxy
