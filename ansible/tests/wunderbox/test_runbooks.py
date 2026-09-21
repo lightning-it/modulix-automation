@@ -303,7 +303,7 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             ),
         )
 
-    def test_access_service_never_generates_missing_runtime_credentials(self):
+    def test_management_services_never_generate_missing_runtime_credentials(self):
         runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
         lifecycle = next(
             task
