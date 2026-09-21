@@ -161,6 +161,7 @@ class ControllerCredentialTests(unittest.TestCase):
                             "ansible.builtin.set_fact": {
                                 "_hetzner_hashicorp_vault_auth": {"synthetic": True},
                                 "_hetzner_vault_memory_auth": {"synthetic": True},
+                                "_hetzner_vault_auth_document": {"synthetic": True},
                                 "_hetzner_vault_ssh_tunnel_ready": True,
                                 "_hetzner_vault_tunnel_control_path_validated": False,
                                 "synthetic_failure_seen": False,
@@ -181,6 +182,7 @@ class ControllerCredentialTests(unittest.TestCase):
                                 "that": [
                                     "_hetzner_hashicorp_vault_auth == {}",
                                     "_hetzner_vault_memory_auth == {}",
+                                    "_hetzner_vault_auth_document == {}",
                                     "not _hetzner_vault_ssh_tunnel_ready",
                                     "_hetzner_vault_tunnel_control_path is none",
                                     f"synthetic_failure_seen == {failure_index >= 0}",
@@ -303,7 +305,9 @@ class ControllerCredentialTests(unittest.TestCase):
         )
         self.assertTrue(all(task.get("no_log") is True for task in selector))
         includes = [
-            task for task in selector if "ansible.builtin.include_tasks" in task
+            task
+            for task in selector[2]["block"]
+            if "ansible.builtin.include_tasks" in task
         ]
         self.assertEqual(len(includes), 2)
         self.assertIn("default('ansible_vault')", includes[0]["when"])
@@ -319,6 +323,145 @@ class ControllerCredentialTests(unittest.TestCase):
             "_hetzner_vault_ssh_tunnel_ready",
             memory[3]["ansible.builtin.assert"]["that"][0],
         )
+
+    def test_all_shared_auth_callers_own_always_cleanup(self):
+        checked = []
+
+        def walk(node, ancestors, path):
+            if isinstance(node, list):
+                for item in node:
+                    walk(item, ancestors, path)
+            elif isinstance(node, dict):
+                include = node.get("ansible.builtin.include_tasks", "")
+                if isinstance(include, str) and Path(include).name in (
+                    "resolve-hashicorp-vault-auth.yml",
+                    "resolve-recovery-secret.yml",
+                ):
+                    if path.name != "resolve-recovery-secret.yml":
+                        self.assertTrue(
+                            any(
+                                "close-hashicorp-vault-ssh-tunnel.yml"
+                                in str(parent.get("always", []))
+                                for parent in ancestors
+                            ),
+                            str(path),
+                        )
+                        checked.append(path)
+                for value in node.values():
+                    walk(value, [*ancestors, node], path)
+
+        for path in (ROOT / "runbooks").rglob("*.yml"):
+            if (
+                "resolve-hashicorp-vault-auth.yml" in path.read_text()
+                or "resolve-recovery-secret.yml" in path.read_text()
+            ):
+                walk(yaml.safe_load(path.read_text()), [], path)
+        self.assertGreaterEqual(len(set(checked)), 12)
+
+    def test_selector_retires_intermediates_for_both_backends_and_failures(self):
+        source = ROOT / "runbooks/00-common/tasks/resolve-hashicorp-vault-auth.yml"
+        close = ROOT / "runbooks/00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml"
+        snapshot = (
+            ROOT / "runbooks/30-operating-systems/ubuntu/24/18-vault-raft-snapshot.yml"
+        )
+        snapshot_text = snapshot.read_text()
+        self.assertNotIn("_hetzner_vault_auth_document.role_id", snapshot_text)
+        self.assertNotIn("_hetzner_vault_auth_document.secret_id", snapshot_text)
+        plays = []
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = root / "backend.yml"
+            backend.write_text(
+                yaml.safe_dump(
+                    [
+                        {
+                            "ansible.builtin.set_fact": {
+                                "_hetzner_vault_memory_auth": {
+                                    "secret_id": "synthetic"
+                                },
+                                "_hetzner_vault_auth_document": {
+                                    "secret_id": "synthetic"
+                                },
+                            },
+                            "no_log": True,
+                        },
+                        {
+                            "ansible.builtin.assert": {"that": "not synthetic_failure"},
+                            "no_log": True,
+                        },
+                        {
+                            "ansible.builtin.set_fact": {
+                                "_hetzner_hashicorp_vault_auth": {
+                                    "role_id": "synthetic-role",
+                                    "secret_id": "synthetic-secret",
+                                    "auth_mount_point": "synthetic-mount",
+                                }
+                            },
+                            "no_log": True,
+                        },
+                    ]
+                )
+            )
+            for selected in ("ansible_vault", "onepassword_memory"):
+                for failure in (False, True):
+                    selector = yaml.safe_load(source.read_text())
+                    for task in selector[2]["block"]:
+                        task["ansible.builtin.include_tasks"] = str(backend)
+                    plays.append(
+                        {
+                            "hosts": "localhost",
+                            "gather_facts": False,
+                            "vars": {
+                                "synthetic_failure": failure,
+                                "hetzner_baremetal_vault": {
+                                    "controller_auth": {"backend": selected}
+                                },
+                            },
+                            "tasks": [
+                                {
+                                    "block": selector,
+                                    "rescue": [
+                                        {
+                                            "ansible.builtin.debug": {
+                                                "msg": "synthetic failure handled"
+                                            }
+                                        }
+                                    ],
+                                },
+                                {
+                                    "ansible.builtin.assert": {
+                                        "that": [
+                                            "_hetzner_vault_memory_auth == {}",
+                                            "_hetzner_vault_auth_document == {}",
+                                            (
+                                                "_hetzner_hashicorp_vault_auth == {}"
+                                                if failure
+                                                else "_hetzner_hashicorp_vault_auth.role_id == 'synthetic-role'"
+                                            ),
+                                        ]
+                                    }
+                                },
+                                {"ansible.builtin.include_tasks": str(close)},
+                                {
+                                    "ansible.builtin.assert": {
+                                        "that": "_hetzner_hashicorp_vault_auth == {}"
+                                    }
+                                },
+                            ],
+                        }
+                    )
+            playbook = root / "lifecycle.yml"
+            playbook.write_text(yaml.safe_dump(plays))
+            env = self.child_env(42)
+            env.pop(MODULE.FD_ENV)
+            result = subprocess.run(
+                [MODULE.PLAYBOOK, "-i", "localhost,", "-c", "local", str(playbook)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_real_ansible_launcher_and_ca_boundaries(self):
         contract, item = fixture()

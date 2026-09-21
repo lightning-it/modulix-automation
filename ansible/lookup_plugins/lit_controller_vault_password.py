@@ -2,18 +2,17 @@
 
 from contextlib import contextmanager
 import os
-from pathlib import Path
+import resource
 import stat
-import subprocess
 import sys
-import tempfile
 
 from ansible.errors import AnsibleError
 from ansible.plugins.lookup import LookupBase
+from ansible.parsing.vault import VaultLib, VaultSecret
 
 
 @contextmanager
-def open_password_file(path, forbidden_paths=()):
+def open_protected_file(path, forbidden_paths=(), *, backup=False):
     if (
         not isinstance(path, str)
         or not path.startswith("/")
@@ -48,9 +47,11 @@ def open_password_file(path, forbidden_paths=()):
                 info.st_mode & 0o022 and not root_group and not sticky_tmp
             ):
                 raise ValueError("unprotected password parent")
+        if backup and stat.S_IMODE(os.fstat(parent).st_mode) != 0o700:
+            raise ValueError("private backup directory required")
         fd = os.open(
             path.rsplit("/", 1)[1],
-            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            (os.O_RDWR if backup else os.O_RDONLY) | os.O_NOFOLLOW | os.O_NONBLOCK,
             dir_fd=parent,
         )
         try:
@@ -59,8 +60,10 @@ def open_password_file(path, forbidden_paths=()):
                 not stat.S_ISREG(info.st_mode)
                 or info.st_nlink != 1
                 or info.st_uid not in (0, os.geteuid())
-                or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)
-                or not 0 < info.st_size <= 1048576
+                or stat.S_IMODE(info.st_mode)
+                not in ((0o600, 0o640, 0o644) if backup else (0o400, 0o600))
+                or info.st_size <= 0
+                or (not backup and info.st_size > 1048576)
             ):
                 raise ValueError("protected regular password file required")
             yield fd
@@ -72,46 +75,34 @@ def open_password_file(path, forbidden_paths=()):
 
 def validate_password_file(path, forbidden_paths=()):
     # Early metadata preflight only, not a capability for a subsequent open.
-    with open_password_file(path, forbidden_paths):
+    with open_protected_file(path, forbidden_paths):
         return path
 
 
+def encrypt_from_descriptor(fd, ciphertext):
+    password = os.pread(fd, 1048577, 0).strip()
+    if not password or len(password) > 1048576:
+        raise ValueError("non-empty bounded password required")
+    # The pinned Ansible library encrypts in-process. No child is created and
+    # the checked password descriptor is never inherited by another process.
+    with open_protected_file(ciphertext, backup=True) as output_fd:
+        os.fchmod(output_fd, 0o600)
+        with os.fdopen(os.dup(output_fd), "r+b") as output:
+            data = VaultLib().encrypt(output.read(), VaultSecret(password))
+            output.seek(0)
+            output.write(data)
+            output.truncate()
+            output.flush()
+            os.fsync(output.fileno())
+    return 0
+
+
 def encrypt_backup(password_path, ciphertext):
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     if not os.path.isabs(ciphertext) or os.path.normpath(ciphertext) != ciphertext:
         raise ValueError("absolute backup path required")
-    with open_password_file(password_path, (ciphertext,)) as fd:
-        with tempfile.TemporaryDirectory(prefix="vault-encrypt-", dir="/tmp") as home:
-            # Ansible's pinned CLI preserves /proc/self/fd paths (follow=False).
-            # Keep this validated inode open until the actual consumer exits.
-            # A pathname/parent replacement cannot redirect its password read.
-            result = subprocess.run(
-                [
-                    "/opt/app-root/bin/ansible-vault",
-                    "encrypt",
-                    "--vault-password-file",
-                    f"/proc/self/fd/{fd}",
-                    "--",
-                    ciphertext,
-                ],
-                pass_fds=(fd,),
-                env={
-                    "PATH": "/opt/app-root/bin:/usr/bin:/bin",
-                    "LANG": "C.UTF-8",
-                    "HOME": home,
-                    "ANSIBLE_CONFIG": str(
-                        Path(__file__).resolve().parents[1]
-                        / "controller-onepassword.cfg"
-                    ),
-                    "ANSIBLE_VAULT_PASSWORD_FILE": "",
-                    "PYTHONDONTWRITEBYTECODE": "1",
-                },
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=1800,
-                check=True,
-            )
-            return result.returncode
+    with open_protected_file(password_path, (ciphertext,)) as fd:
+        return encrypt_from_descriptor(fd, ciphertext)
 
 
 class LookupModule(LookupBase):

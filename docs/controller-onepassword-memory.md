@@ -47,19 +47,28 @@ remains disabled.
 
 The backup runbook closes its caller-owned Vault tunnel in an `always` section
 immediately after collecting credentials, including resolver/read failures.
+The shared selector clears backend-specific intermediate facts on both success
+and failure. Consumers use only `_hetzner_hashicorp_vault_auth`; the shared
+transport close lifecycle clears this output and both intermediate facts before
+attempting socket removal, including for OS, TLS, migration and recovery callers.
+The Raft snapshot caller uses the same backend-neutral authentication contract.
 AppRole authentication is not backup encryption custody: the backup runbook
 still requires its existing Ansible Vault password-file contract. A shared
 validator used by both legacy authentication and backup checks canonical,
 symlink-free protected parent directories, a distinct readable regular file,
 root/controller ownership, single link, 0400/0600 mode, and 1-byte-to-1-MiB size.
 Backup validates before secret reads/dumps. At encryption the helper opens and
-validates the password again, keeps that exact descriptor alive and passes
-only `/proc/self/fd/N` to the pinned `ansible-vault` consumer. Replacing the
-password pathname or its parent cannot redirect that read. The early metadata
+validates the password again and reads only that exact open descriptor. The
+pinned Ansible Vault library encrypts in the same helper process, with core dumps
+disabled: no child process can retain an inherited password handle. The backup
+file is also opened descriptor-relatively without following symlinks in its
+private directory and written through that descriptor, with mode 0600. Replacing
+the password pathname or its parent cannot redirect that read. The early metadata
 lookup is only a preflight, not a promise about a later pathname open. The
 legacy backend still uses Ansible's initially loaded Vault secret; its added
 metadata preflight does not replace that existing decryption mechanism.
-The validator never reads the password value. This memory-only
+The metadata validator never reads the password value. The encryptor reads it
+only in process memory, never into logs or a new credential file. This memory-only
 launcher deliberately does not supply that separate backup encryption key.
 
 The controller contract retains schema, subject, AppRole name and auth mount.

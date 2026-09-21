@@ -518,11 +518,11 @@
             vault_raft_snapshot_target_ca_cert_path: >-
               {{ hetzner_baremetal_vault.tls.target_ca_cert_path }}
             vault_raft_snapshot_auth_mount_point: >-
-              {{ hetzner_baremetal_vault.controller_auth.auth_mount_point }}
+              {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
             vault_raft_snapshot_role_id: >-
-              {{ _hetzner_vault_auth_document.role_id }}
+              {{ _hetzner_hashicorp_vault_auth.role_id }}
             vault_raft_snapshot_secret_id: >-
-              {{ _hetzner_vault_auth_document.secret_id }}
+              {{ _hetzner_hashicorp_vault_auth.secret_id }}
             vault_raft_snapshot_controller_escrow_root_path: >-
               {{ hetzner_baremetal_vault.backup.controller_escrow_root_path }}
             vault_raft_snapshot_controller_document_path: >-

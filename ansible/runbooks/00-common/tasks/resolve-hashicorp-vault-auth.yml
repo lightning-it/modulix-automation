@@ -1,6 +1,9 @@
 ---
 - name: Select the requested controller Vault authentication contract
   ansible.builtin.set_fact:
+    _hetzner_hashicorp_vault_auth: {}
+    _hetzner_vault_memory_auth: {}
+    _hetzner_vault_auth_document: {}
     _hetzner_vault_controller_auth: >-
       {{ hashicorp_vault_controller_auth
          | default(hetzner_baremetal_vault.controller_auth) }}
@@ -16,16 +19,25 @@
     quiet: true
   no_log: true
 
-- name: Resolve the existing encrypted controller document
-  ansible.builtin.include_tasks: resolve-hashicorp-vault-auth-ansible-vault.yml
-  when: >-
-    _hetzner_vault_controller_auth.backend | default('ansible_vault')
-    == 'ansible_vault'
-  no_log: true
+- name: Resolve one backend and retire intermediate credential facts
+  block:
+    - name: Resolve the existing encrypted controller document
+      ansible.builtin.include_tasks: resolve-hashicorp-vault-auth-ansible-vault.yml
+      when: >-
+        _hetzner_vault_controller_auth.backend | default('ansible_vault')
+        == 'ansible_vault'
+      no_log: true
 
-- name: Resolve the pinned memory-only controller item
-  ansible.builtin.include_tasks: resolve-hashicorp-vault-auth-onepassword.yml
-  when: >-
-    _hetzner_vault_controller_auth.backend | default('ansible_vault')
-    == 'onepassword_memory'
+    - name: Resolve the pinned memory-only controller item
+      ansible.builtin.include_tasks: resolve-hashicorp-vault-auth-onepassword.yml
+      when: >-
+        _hetzner_vault_controller_auth.backend | default('ansible_vault')
+        == 'onepassword_memory'
+      no_log: true
+  always:
+    - name: Forget backend-specific credential intermediates
+      ansible.builtin.set_fact:
+        _hetzner_vault_memory_auth: {}
+        _hetzner_vault_auth_document: {}
+      no_log: true
   no_log: true

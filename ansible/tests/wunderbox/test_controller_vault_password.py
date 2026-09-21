@@ -49,7 +49,7 @@ class PasswordCustodyTests(unittest.TestCase):
             self.assertEqual(vault.decrypt(backup.read_bytes()), b"synthetic-content")
 
     def test_encryption_consumes_checked_inode_after_path_or_parent_swap(self):
-        actual_run = subprocess.run
+        actual_consumer = MODULE.encrypt_from_descriptor
         for replace_parent in (False, True):
             with self.subTest(replace_parent=replace_parent):
                 with tempfile.TemporaryDirectory() as directory:
@@ -63,14 +63,9 @@ class PasswordCustodyTests(unittest.TestCase):
                     backup.write_bytes(b"synthetic-backup-payload")
                     checked_fds = []
 
-                    def swap_then_consume(command, **kwargs):
-                        fd = kwargs["pass_fds"][0]
+                    def swap_then_consume(fd, destination):
                         checked_fds.append(fd)
-                        self.assertIn(f"/proc/self/fd/{fd}", command)
-                        self.assertNotIn(str(password), command)
-                        self.assertEqual(
-                            kwargs["env"]["ANSIBLE_VAULT_PASSWORD_FILE"], ""
-                        )
+                        self.assertFalse(os.get_inheritable(fd))
                         if replace_parent:
                             custody.rename(root / "retired")
                             custody.mkdir(mode=0o700)
@@ -78,10 +73,14 @@ class PasswordCustodyTests(unittest.TestCase):
                             password.rename(custody / "retired")
                         password.write_bytes(b"synthetic-replacement-password")
                         password.chmod(0o600)
-                        return actual_run(command, **kwargs)
+                        with mock.patch(
+                            "subprocess.Popen",
+                            side_effect=AssertionError("no child allowed"),
+                        ):
+                            return actual_consumer(fd, destination)
 
                     with mock.patch.object(
-                        MODULE.subprocess, "run", side_effect=swap_then_consume
+                        MODULE, "encrypt_from_descriptor", side_effect=swap_then_consume
                     ):
                         self.assertEqual(
                             MODULE.encrypt_backup(str(password), str(backup)), 0
@@ -109,19 +108,19 @@ class PasswordCustodyTests(unittest.TestCase):
             password = root / "password"
             password.write_text("synthetic-password")
             password.chmod(0o644)
-            with mock.patch.object(MODULE.subprocess, "run") as consumer:
+            with mock.patch.object(MODULE, "encrypt_from_descriptor") as consumer:
                 with self.assertRaises(ValueError):
                     MODULE.encrypt_backup(str(password), str(root / "backup"))
                 consumer.assert_not_called()
             password.chmod(0o600)
             fds = []
 
-            def fail(command, **kwargs):
-                fds.extend(kwargs["pass_fds"])
-                raise subprocess.TimeoutExpired(command, 1800)
+            def fail(fd, destination):
+                fds.append(fd)
+                raise RuntimeError("synthetic encryption failure")
 
-            with mock.patch.object(MODULE.subprocess, "run", side_effect=fail):
-                with self.assertRaises(subprocess.TimeoutExpired):
+            with mock.patch.object(MODULE, "encrypt_from_descriptor", side_effect=fail):
+                with self.assertRaises(RuntimeError):
                     MODULE.encrypt_backup(str(password), str(root / "backup"))
             for fd in fds:
                 with self.assertRaises(OSError):
