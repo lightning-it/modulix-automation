@@ -7,6 +7,10 @@ These are intentional lifecycle changes, not byte-for-byte preservation.
 `hashicorp_vault_controller_auth.backend: onepassword_memory`
 is an explicit alternative for a trusted desktop-to-Linux-EE transport. There is
 no automatic fallback or credential generation.
+The memory resolver rejects a simultaneously configured Ansible Vault password
+file or identity list (environment or active Ansible configuration). Select the
+dedicated password-file-free profile; the legacy backend's separate backup-key
+contract is not a fallback credential source for this memory profile.
 
 The trusted outer transport selects the approved 1Password account, vault and
 immutable item using the existing desktop CLI. It sends exactly one JSON item

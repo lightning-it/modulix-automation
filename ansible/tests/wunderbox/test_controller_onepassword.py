@@ -271,6 +271,102 @@ class ControllerCredentialTests(unittest.TestCase):
             self.assertEqual(result, value)
             self.assertTrue(result.__UNSAFE__)
 
+    def test_memory_resolver_rejects_parallel_vault_password_sources(self):
+        source = (
+            ROOT
+            / "runbooks/00-common/tasks/resolve-hashicorp-vault-auth-onepassword.yml"
+        )
+        guard = yaml.safe_load(source.read_text())[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            password = root / "password"
+            password.write_text("synthetic-password")
+            password.chmod(0o600)
+            for mode in ("none", "environment", "configuration", "identity"):
+                with self.subTest(mode=mode):
+                    config = root / "profile.cfg"
+                    config.write_text(
+                        "[defaults]\n"
+                        + (
+                            f"vault_password_file = {password}\n"
+                            if mode == "configuration"
+                            else ""
+                        )
+                    )
+                    play = root / "guard.yml"
+                    play.write_text(
+                        yaml.safe_dump(
+                            [
+                                {
+                                    "hosts": "localhost",
+                                    "gather_facts": False,
+                                    "vars": {
+                                        "_hetzner_vault_controller_auth": {
+                                            "schema_version": 1,
+                                            "auth_method": "approle",
+                                            "onepassword": {},
+                                        },
+                                        "hetzner_baremetal_vault": {
+                                            "validate_certs": True,
+                                            "namespace": "",
+                                            "timeout": 5,
+                                            "retries": 0,
+                                        },
+                                    },
+                                    "tasks": [
+                                        {
+                                            "ansible.builtin.set_fact": {
+                                                "guard_rejected": False
+                                            }
+                                        },
+                                        {
+                                            "block": [guard],
+                                            "rescue": [
+                                                {
+                                                    "ansible.builtin.set_fact": {
+                                                        "guard_rejected": True
+                                                    }
+                                                }
+                                            ],
+                                        },
+                                        {
+                                            "ansible.builtin.assert": {
+                                                "that": f"guard_rejected == {mode != 'none'}"
+                                            }
+                                        },
+                                    ],
+                                }
+                            ]
+                        )
+                    )
+                    env = {
+                        k: v
+                        for k, v in os.environ.items()
+                        if not k.startswith(("VAULT_", "ANSIBLE_VAULT_"))
+                    }
+                    env["ANSIBLE_CONFIG"] = str(config)
+                    if mode == "environment":
+                        env["ANSIBLE_VAULT_PASSWORD_FILE"] = str(password)
+                    if mode == "identity":
+                        env["ANSIBLE_VAULT_IDENTITY_LIST"] = f"fixture@{password}"
+                    result = subprocess.run(
+                        [
+                            "/opt/app-root/bin/ansible-playbook",
+                            "-i",
+                            "localhost,",
+                            "-c",
+                            "local",
+                            str(play),
+                        ],
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    self.assertEqual(
+                        result.returncode, 0, result.stdout + result.stderr
+                    )
+
     def test_json_numeric_constants_and_overflow_are_rejected(self):
         for number in ("NaN", "Infinity", "-Infinity", "1e999", "-1e999"):
             with self.subTest(number=number), self.assertRaises(ValueError):
