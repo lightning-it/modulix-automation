@@ -114,13 +114,9 @@
       when: wunderbox_management_backup_action | default('plan') == 'plan'
 
     - name: Require separate backup encryption custody before reading secrets
-      ansible.builtin.assert:
-        that:
-          - lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') | length > 0
-        fail_msg: >-
-          Database backup requires the existing Ansible Vault encryption custody.
-          The memory-only AppRole profile does not supply a backup encryption key.
-        quiet: true
+      ansible.builtin.include_tasks: >-
+        ../../00-common/tasks/validate-controller-vault-password-file.yml
+      no_log: true
 
   tasks:
     - name: Read backup credentials through a caller-owned Vault transport
@@ -241,6 +237,11 @@
         flat: true
       no_log: true
 
+    - name: Revalidate encryption custody immediately before use
+      ansible.builtin.include_tasks: >-
+        ../../00-common/tasks/validate-controller-vault-password-file.yml
+      no_log: true
+
     - name: Encrypt the fetched dump with the controller Ansible Vault custody
       delegate_to: localhost
       become: false
@@ -249,7 +250,7 @@
           - ansible-vault
           - encrypt
           - --vault-password-file
-          - "{{ lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') }}"
+          - "{{ _hetzner_vault_validated_password_file }}"
           - "{{ _management_backup_ciphertext }}"
       register: _management_backup_encrypt_result
       changed_when: true

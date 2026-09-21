@@ -17,13 +17,19 @@ import ssl
 import stat
 import subprocess
 import sys
+import tempfile
 
 from ansible.errors import AnsibleError
 from ansible.plugins.lookup import LookupBase
+from ansible.utils.unsafe_proxy import wrap_var
 
 LIMIT = 1048576
 FD_ENV = "LIT_CONTROLLER_ONEPASSWORD_FD"
 MEMORY_NAME = "lit-controller-onepassword"
+PLAYBOOK = "/opt/app-root/bin/ansible-playbook"
+SYSTEM_PATH = (
+    "/opt/app-root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+)
 SEALS = fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
 
 
@@ -105,11 +111,13 @@ def validate_item(item, contract):
         raise ValueError("AppRole identity drift")
     result = {key: document[key] for key in ("role_id", "secret_id")}
     if not all(
-        isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9._~:+/-]{16,4096}", value)
+        isinstance(value, str) and re.fullmatch(r"[^\r\n]{16,4096}", value)
         for value in result.values()
     ):
         raise ValueError("invalid AppRole material")
-    return result
+    # Credential strings are data, including valid punctuation/template-looking
+    # text. They must never be interpreted as a second Jinja expression.
+    return wrap_var(result)
 
 
 def public_ca_digest(path, project_root, expected):
@@ -222,18 +230,16 @@ def validated_agent_socket(path):
     return path
 
 
-def child_environment(fd, agent_socket=None):
-    # Do not forward OP_*, VAULT_*, cloud tokens, loader variables or arbitrary
-    # Ansible overrides. These public runtime selectors are the complete list.
-    safe_names = {
-        "PATH",
-        "HOME",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "TMPDIR",
+def child_environment(fd, runtime_dir, agent_socket=None):
+    # No caller environment is inherited, including PATH and HOME/plugin search
+    # locations. runtime_dir is freshly created by the trusted launcher.
+    env = {
+        "PATH": SYSTEM_PATH,
+        "HOME": runtime_dir,
+        "TMPDIR": runtime_dir,
+        "LANG": "C.UTF-8",
+        "ANSIBLE_LOCAL_TEMP": runtime_dir + "/ansible-tmp",
     }
-    env = {key: value for key, value in os.environ.items() if key in safe_names}
     if agent_socket is not None:
         env["SSH_AUTH_SOCK"] = validated_agent_socket(agent_socket)
     env.update(
@@ -269,7 +275,8 @@ def run_child(command, env, fd, timeout=1800):
         return child.wait(timeout=timeout)
     finally:
         # Includes forked workers retaining the credential FD, also after a
-        # successful leader exit. The one-shot EE terminates any escaped session.
+        # successful leader exit. The enforced namespace-init exit also kills
+        # escaped sessions, which cannot be reached by this process group.
         try:
             os.killpg(child.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -281,7 +288,16 @@ def interrupted(signum, frame):
     raise InterruptedError("controller interrupted")
 
 
+def require_namespace_init():
+    # Linux tears down EVERY remaining process in a PID namespace when its init
+    # exits, including setsid/double-fork descendants. Do not accept --pid=host,
+    # podman exec, --init/tini or a wrapper that leaves this launcher as a child.
+    if sys.platform != "linux" or os.getpid() != 1 or os.getppid() != 0:
+        raise ValueError("one-shot execution as PID namespace init required")
+
+
 def launch(args):
+    require_namespace_init()
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     signal.signal(signal.SIGTERM, interrupted)
     agent_socket = None
@@ -306,9 +322,12 @@ def launch(args):
         with os.fdopen(os.dup(fd), "wb") as output:
             output.write(payload)
         fcntl.fcntl(fd, fcntl.F_ADD_SEALS, SEALS)
-        rc = run_child(
-            ["ansible-playbook", *args[1:]], child_environment(fd, agent_socket), fd
-        )
+        with tempfile.TemporaryDirectory(
+            prefix="lit-controller-", dir="/tmp"
+        ) as runtime:
+            rc = run_child(
+                [PLAYBOOK, *args[1:]], child_environment(fd, runtime, agent_socket), fd
+            )
         print(json.dumps({"ansible_rc": rc, "secret_output": False}))
         return rc
     finally:

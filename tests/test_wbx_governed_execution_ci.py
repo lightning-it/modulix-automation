@@ -152,6 +152,23 @@ class GovernedExecutionWorkflowTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, flattened)
 
+    def test_namespace_lifecycle_is_a_real_separate_oci_job(self) -> None:
+        job = self.workflow["jobs"]["controller-memory-namespace"]
+        self.assertEqual(job["runs-on"], "ubuntu-24.04")
+        self.assertEqual(job["timeout-minutes"], "5")
+        self.assertEqual(job["permissions"], {"contents": "read"})
+        self.assertEqual(job["env"]["CONTROLLER_EE_IMAGE"], self.devtools_image)
+        self.assertNotIn("container", job)
+        self.assertNotIn("if", job)
+        self.assertNotIn("continue-on-error", job)
+        self.assertEqual(job["steps"][0], self.steps["Checkout exact candidate"])
+        run = job["steps"][1]["run"]
+        self.assertTrue(run.startswith("set -euo pipefail\n"))
+        self.assertIn('docker pull "$CONTROLLER_EE_IMAGE"', run)
+        self.assertIn(
+            "bash ansible/tests/test_controller_onepassword_oci.sh docker", run
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -52,6 +53,13 @@ def fixture():
 
 
 class ControllerCredentialTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime = tempfile.TemporaryDirectory()
+        self.addCleanup(self.runtime.cleanup)
+
+    def child_env(self, fd, agent_socket=None):
+        return MODULE.child_environment(fd, self.runtime.name, agent_socket)
+
     def test_child_environment_is_allowlisted(self):
         unsafe = {
             "OP_SESSION_test": "synthetic",
@@ -61,13 +69,31 @@ class ControllerCredentialTests(unittest.TestCase):
             "LD_PRELOAD": "synthetic",
             "ANSIBLE_CONFIG": "/untrusted",
             "SSH_AUTH_SOCK": "/ambient-agent-not-authorized",
+            "PATH": "/untrusted/bin",
+            "HOME": "/untrusted/home",
+            "TMPDIR": "/untrusted/tmp",
         }
         with patch.dict(os.environ, unsafe):
-            env = MODULE.child_environment(42)
+            env = self.child_env(42)
         for key in unsafe:
             self.assertNotEqual(env.get(key), unsafe[key])
         self.assertEqual(env[MODULE.FD_ENV], "42")
         self.assertEqual(env["ANSIBLE_NO_LOG"], "true")
+        self.assertEqual(env["PATH"], MODULE.SYSTEM_PATH)
+        self.assertEqual(env["HOME"], self.runtime.name)
+
+    def test_launch_rejects_non_init_before_reading_credentials(self):
+        with patch.object(MODULE.os, "getpid", return_value=2):
+            with patch.object(MODULE.sys, "stdin") as source:
+                with self.assertRaises(ValueError):
+                    MODULE.launch(["--", "unused.yml"])
+                source.buffer.read.assert_not_called()
+
+    def test_namespace_init_requires_zero_parent(self):
+        with patch.object(MODULE.os, "getpid", return_value=1):
+            with patch.object(MODULE.os, "getppid", return_value=10):
+                with self.assertRaises(ValueError):
+                    MODULE.require_namespace_init()
 
     def test_agent_requires_explicit_private_owned_socket(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -76,27 +102,25 @@ class ControllerCredentialTests(unittest.TestCase):
                 agent.bind(path)
                 os.chmod(path, 0o600)
                 with patch.dict(os.environ, SSH_AUTH_SOCK="/ambient-other-agent"):
-                    self.assertNotIn("SSH_AUTH_SOCK", MODULE.child_environment(42))
-                    self.assertEqual(
-                        MODULE.child_environment(42, path)["SSH_AUTH_SOCK"], path
-                    )
+                    self.assertNotIn("SSH_AUTH_SOCK", self.child_env(42))
+                    self.assertEqual(self.child_env(42, path)["SSH_AUTH_SOCK"], path)
                 alias = Path(directory) / "alias"
                 alias.symlink_to(path)
                 regular = Path(directory) / "regular"
                 regular.touch(mode=0o600)
                 for invalid in ("relative", str(alias), str(regular)):
                     with self.subTest(path=invalid), self.assertRaises(ValueError):
-                        MODULE.child_environment(42, invalid)
+                        self.child_env(42, invalid)
                 with patch.object(MODULE.os, "geteuid", return_value=os.geteuid() + 1):
                     with self.assertRaises(ValueError):
-                        MODULE.child_environment(42, path)
+                        self.child_env(42, path)
                 os.chmod(path, 0o666)
                 with self.assertRaises(ValueError):
-                    MODULE.child_environment(42, path)
+                    self.child_env(42, path)
                 os.chmod(path, 0o600)
                 os.chmod(directory, 0o777)
                 with self.assertRaises(ValueError):
-                    MODULE.child_environment(42, path)
+                    self.child_env(42, path)
                 os.chmod(directory, 0o700)
 
     def test_backup_vault_lifecycle_cleanup_on_success_and_each_failure(self):
@@ -106,7 +130,9 @@ class ControllerCredentialTests(unittest.TestCase):
         self.assertEqual(len(lifecycle["block"]), 5)
         resolver = lifecycle["block"][0]["ansible.builtin.include_tasks"]
         self.assertTrue((runbook.parent / resolver).resolve().is_file())
-        self.assertIn("ANSIBLE_VAULT_PASSWORD_FILE", str(play["pre_tasks"][-1]))
+        self.assertIn(
+            "validate-controller-vault-password-file.yml", str(play["pre_tasks"][-1])
+        )
         self.assertIn("end_play", str(play["pre_tasks"][-2]))
         self.assertFalse(any("resolve-hashicorp" in str(t) for t in play["pre_tasks"]))
         self.assertNotIn("vault_secret_bundle", str(play["tasks"][1:]))
@@ -167,7 +193,7 @@ class ControllerCredentialTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "cleanup.yml"
             path.write_text(yaml.safe_dump(plays))
-            env = MODULE.child_environment(42)
+            env = self.child_env(42)
             env.pop(MODULE.FD_ENV)
             result = subprocess.run(
                 ["ansible-playbook", "-i", "localhost,", "-c", "local", str(path)],
@@ -191,7 +217,7 @@ class ControllerCredentialTests(unittest.TestCase):
             )
             with self.assertRaises(subprocess.TimeoutExpired):
                 MODULE.run_child(
-                    ["python3", "-c", code], MODULE.child_environment(fd), fd, timeout=1
+                    [sys.executable, "-c", code], self.child_env(fd), fd, timeout=1
                 )
             pid = int(pidfile.read_text())
             proc = Path(f"/proc/{pid}/stat")
@@ -224,7 +250,7 @@ class ControllerCredentialTests(unittest.TestCase):
             ("role_name", "other"),
             ("auth_mount_point", "other"),
             ("schema_version", True),
-            ("secret_id", "{{ unsafe_expression }}"),
+            ("secret_id", "synthetic-secret\ninvalid"),
         ]:
             candidate = copy.deepcopy(item)
             note = json.loads(candidate["fields"][0]["value"])
@@ -232,6 +258,16 @@ class ControllerCredentialTests(unittest.TestCase):
             candidate["fields"][0]["value"] = json.dumps(note)
             with self.subTest(field=field), self.assertRaises(ValueError):
                 MODULE.validate_item(candidate, contract)
+
+    def test_approle_characters_are_literal_not_templates(self):
+        contract, item = fixture()
+        for value in ("valid=credential:with space", "{{ lookup('pipe', 'false') }}"):
+            note = json.loads(item["fields"][0]["value"])
+            note["secret_id"] = value
+            item["fields"][0]["value"] = json.dumps(note)
+            result = MODULE.validate_item(item, contract)["secret_id"]
+            self.assertEqual(result, value)
+            self.assertTrue(result.__UNSAFE__)
 
     def test_duplicate_notes_and_json_keys_rejected(self):
         contract, item = fixture()
@@ -349,10 +385,20 @@ class ControllerCredentialTests(unittest.TestCase):
                 ANSIBLE_LOOKUP_PLUGINS=str(PLUGIN.parent),
                 SSH_AUTH_SOCK="/ambient-agent-must-not-reach-the-child",
             )
+            # Unit layer: exercise the real Ansible transport while mocking ONLY
+            # the namespace-init precondition. The separate OCI fixture runs the
+            # unmodified launcher as real PID 1 and proves namespace teardown.
+            unit_runner = [
+                sys.executable,
+                "-c",
+                "import runpy,sys; m=runpy.run_path(sys.argv[1]); "
+                "m['launch'].__globals__['require_namespace_init']=lambda:None; "
+                "sys.exit(m['launch'](sys.argv[2:]))",
+                str(PLUGIN),
+            ]
             result = subprocess.run(
                 [
-                    "python3",
-                    str(PLUGIN),
+                    *unit_runner,
                     "--",
                     "-i",
                     "localhost,",
@@ -380,8 +426,7 @@ class ControllerCredentialTests(unittest.TestCase):
                 play.write_text(yaml.safe_dump(body))
                 opted_in = subprocess.run(
                     [
-                        "python3",
-                        str(PLUGIN),
+                        *unit_runner,
                         "--ssh-agent-socket",
                         agent_path,
                         "--",
@@ -408,8 +453,7 @@ class ControllerCredentialTests(unittest.TestCase):
             item["version"] = 2
             rejected = subprocess.run(
                 [
-                    "python3",
-                    str(PLUGIN),
+                    *unit_runner,
                     "--",
                     "-i",
                     "localhost,",

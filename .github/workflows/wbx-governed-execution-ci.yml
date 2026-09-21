@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     container:
-      image: >-
+      image: &controller_ee >-
         quay.io/l-it/ee-wunder-devtools-ubi9@sha256:82e9586f082f8818aba9e8c12b4cab696dda31b025bf561e7e9fdfd1037e7d25
       options: --user 0:0
     permissions:
@@ -76,7 +76,11 @@ jobs:
 
           python3 -m unittest discover -s ansible/tests/wunderbox -v
           black --check ansible/lookup_plugins/lit_controller_onepassword.py \
-            ansible/tests/wunderbox/test_controller_onepassword.py
+            ansible/lookup_plugins/lit_controller_vault_password.py \
+            ansible/tests/controller_onepassword_oci_fixture.py \
+            ansible/tests/wunderbox/test_controller_onepassword.py \
+            ansible/tests/wunderbox/test_controller_vault_password.py
+          shellcheck ansible/tests/test_controller_onepassword_oci.sh
           yamllint ansible/runbooks/00-common/tasks/resolve-hashicorp-vault-auth*.yml
 
       - name: Run execution wrapper contracts
@@ -85,3 +89,23 @@ jobs:
           set -euo pipefail
           ansible/tests/test_ansible_nav.sh
           ansible/tests/test_ansible_nav_local.sh
+
+  controller-memory-namespace:
+    name: Controller memory namespace lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      CONTROLLER_EE_IMAGE: *controller_ee
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pinned
+        with:
+          persist-credentials: false
+      - name: Test real namespace exit and interruption with synthetic credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$CONTROLLER_EE_IMAGE"
+          bash ansible/tests/test_controller_onepassword_oci.sh docker

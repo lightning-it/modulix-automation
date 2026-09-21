@@ -17,11 +17,20 @@ The launcher creates a sealed, owner-bound anonymous memory descriptor and
 inherits only its numeric handle into Ansible. It uses the dedicated
 `controller-onepassword.cfg` profile (no legacy password file), disables secret
 logging and disk fact caching, and emits only the Ansible return code. It builds
-the child environment from an explicit public-runtime allowlist, never ambient
-1Password, Vault, cloud or loader credentials. The child has a separate process
-group, which is killed on exit, timeout or handled interruption. Run this launcher
-as the main process of a one-shot isolated EE: EE teardown also terminates
-processes that deliberately create a different session. A failed
+the child environment from fixed settings, never ambient PATH, HOME, 1Password,
+Vault, cloud or loader values. It uses the pinned EE's absolute executable
+`/opt/app-root/bin/ansible-playbook`, a fixed system PATH and a new private
+HOME/TMPDIR per invocation, preventing user-home plugin discovery.
+The launcher rejects execution unless it is Linux PID 1 with parent PID 0,
+before reading stdin or allocating credential memory. Launch with the pinned
+EE's `/opt/app-root/bin/python3 -I` directly (or a wrapper that uses `exec`), in
+a private PID namespace: no `--init`/tini, `--pid=host` or `podman exec`.
+On success, error, timeout or handled interruption the launcher exits; Linux
+then kills every remaining process in its namespace, including `setsid()`
+descendants. Process-group cleanup also retires ordinary workers promptly.
+The source/project must be read-only and approved; this is not an isolation
+boundary against malicious playbooks or another process with the same UID.
+A failed
 or timed-out Apply is not proof that no remote changes occurred: follow the
 runbook's rollback/readback procedure, not an automatic retry.
 
@@ -39,8 +48,12 @@ remains disabled.
 The backup runbook closes its caller-owned Vault tunnel in an `always` section
 immediately after collecting credentials, including resolver/read failures.
 AppRole authentication is not backup encryption custody: the backup runbook
-still requires its existing Ansible Vault password-file contract and now rejects
-missing custody before any secret read or database dump. This memory-only
+still requires its existing Ansible Vault password-file contract. A shared
+validator used by both legacy authentication and backup checks canonical,
+symlink-free protected parent directories, a distinct readable regular file,
+root/controller ownership, single link, 0400/0600 mode, and 1-byte-to-1-MiB size.
+Backup validates before secret reads/dumps and revalidates immediately before
+encryption; the validator never reads the password value. This memory-only
 launcher deliberately does not supply that separate backup encryption key.
 
 The controller contract retains schema, subject, AppRole name and auth mount.
@@ -48,8 +61,11 @@ Its `onepassword` mapping must contain exactly `item_id`, `vault_id`,
 `item_version` (positive integer), `item_title` and `ca_sha256`. The item must be
 the exact Secure Note and contain one JSON `notesPlain` field with the matching
 schema/subject/auth method/role/mount plus the existing `role_id` and `secret_id`.
-Duplicate JSON keys, ambiguous notes, drift, unsealed input and template-bearing
-credential values fail closed. The public CA must be the exact hash-pinned,
+Duplicate JSON keys, ambiguous notes, drift and unsealed input fail closed.
+AppRole strings retain the existing 16–4096-character, no-CR/LF contract,
+including punctuation such as `=`. They are explicitly Ansible-unsafe data;
+template-looking credential text is passed literally, never evaluated.
+The public CA must be the exact hash-pinned,
 protected non-symlink file beneath the canonical project `.secrets` directory.
 Mount the project, plugins and CA read-only in the execution environment.
 

@@ -14,6 +14,10 @@
   changed_when: false
   no_log: true
 
+- name: Validate existing controller password custody before opening a tunnel
+  ansible.builtin.include_tasks: validate-controller-vault-password-file.yml
+  no_log: true
+
 - name: Establish the inventory-declared controller Vault SSH tunnel
   ansible.builtin.include_tasks: ensure-hashicorp-vault-ssh-tunnel.yml
 
