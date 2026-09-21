@@ -303,6 +303,28 @@ class WunderboxRunbookSafetyTests(unittest.TestCase):
             ),
         )
 
+    def test_management_services_never_generate_missing_runtime_credentials(self):
+        runbook = load_yaml(RUNBOOK_DIRECTORY / "30-management-services.yml")[-1]
+        lifecycle = next(
+            task
+            for task in runbook["tasks"]
+            if task["name"]
+            == "Execute the management-service lifecycle through scoped Vault access"
+        )
+        lifecycle_tasks = {task["name"]: task for task in lifecycle["block"]}
+
+        for name in (
+            "Resolve Keycloak runtime secrets from Vault",
+            "Resolve Guacamole runtime secrets from Vault",
+        ):
+            with self.subTest(task=name):
+                self.assertIs(
+                    lifecycle_tasks[name]["vars"][
+                        "vault_secret_bundle_generate_missing"
+                    ],
+                    False,
+                )
+
     def test_management_tls_custody_separates_issuer_and_kv_approles(self):
         path = RUNBOOK_DIRECTORY / "20-management-tls-custody.yml"
         play = load_yaml(path)[0]

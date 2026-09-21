@@ -143,6 +143,7 @@
             <<: *vault_role_vars
             vault_secret_bundle_kv_path: >-
               {{ wunderbox_management_vault_paths.keycloak }}
+            vault_secret_bundle_generate_missing: false
             vault_secret_bundle_items:
               - {name: db_password, length: 48}
               - {name: admin_password, length: 48}
@@ -242,6 +243,7 @@
             <<: *vault_role_vars
             vault_secret_bundle_kv_path: >-
               {{ wunderbox_management_vault_paths.guacamole }}
+            vault_secret_bundle_generate_missing: false
             vault_secret_bundle_items:
               - {name: db_password, length: 48}
               - {name: breakglass_password, length: 48}
