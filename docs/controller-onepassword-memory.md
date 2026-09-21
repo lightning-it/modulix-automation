@@ -52,8 +52,14 @@ still requires its existing Ansible Vault password-file contract. A shared
 validator used by both legacy authentication and backup checks canonical,
 symlink-free protected parent directories, a distinct readable regular file,
 root/controller ownership, single link, 0400/0600 mode, and 1-byte-to-1-MiB size.
-Backup validates before secret reads/dumps and revalidates immediately before
-encryption; the validator never reads the password value. This memory-only
+Backup validates before secret reads/dumps. At encryption the helper opens and
+validates the password again, keeps that exact descriptor alive and passes
+only `/proc/self/fd/N` to the pinned `ansible-vault` consumer. Replacing the
+password pathname or its parent cannot redirect that read. The early metadata
+lookup is only a preflight, not a promise about a later pathname open. The
+legacy backend still uses Ansible's initially loaded Vault secret; its added
+metadata preflight does not replace that existing decryption mechanism.
+The validator never reads the password value. This memory-only
 launcher deliberately does not supply that separate backup encryption key.
 
 The controller contract retains schema, subject, AppRole name and auth mount.

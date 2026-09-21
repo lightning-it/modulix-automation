@@ -131,6 +131,9 @@ environment = dict(
     HOME="/untrusted/home",
     SSH_AUTH_SOCK="/untrusted/agent",
 )
+# Ansible also discovers playbook-adjacent plugins. Make the fixture project
+# explicit instead of depending on that implicit search behavior or image cwd.
+os.chdir(root)
 os.execve(
     "/opt/app-root/bin/python3",
     [

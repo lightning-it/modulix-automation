@@ -247,9 +247,10 @@
       become: false
       ansible.builtin.command:
         argv:
-          - ansible-vault
+          - /opt/app-root/bin/python3
+          - -I
+          - "{{ playbook_dir }}/../../../lookup_plugins/lit_controller_vault_password.py"
           - encrypt
-          - --vault-password-file
           - "{{ _hetzner_vault_validated_password_file }}"
           - "{{ _management_backup_ciphertext }}"
       register: _management_backup_encrypt_result
