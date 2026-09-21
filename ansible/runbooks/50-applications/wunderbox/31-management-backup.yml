@@ -216,43 +216,16 @@
         postgres_backup_restore_retention_keep_last: 0
       no_log: true
 
-    - name: Create the protected controller backup directory
-      delegate_to: localhost
-      become: false
-      ansible.builtin.file:
-        path: "{{ _management_backup_controller_dir }}"
-        state: directory
-        mode: '0700'
-
-    - name: Arm cleanup for incomplete controller backup plaintext
-      ansible.builtin.debug:
-        msg: "Incomplete controller backup artifact cleanup is armed."
-      changed_when: true
-      notify: Remove incomplete controller backup artifact
-
-    - name: Fetch the transient database dump to the controller
-      ansible.builtin.fetch:
-        src: "{{ _management_backup_file }}"
-        dest: "{{ _management_backup_ciphertext }}"
-        flat: true
-      no_log: true
-
     - name: Revalidate encryption custody immediately before use
       ansible.builtin.include_tasks: >-
         ../../00-common/tasks/validate-controller-vault-password-file.yml
       no_log: true
 
-    - name: Encrypt the fetched dump with the controller Ansible Vault custody
-      delegate_to: localhost
-      become: false
-      ansible.builtin.command:
-        argv:
-          - "{{ ansible_playbook_python }}"
-          - -I
-          - "{{ playbook_dir }}/../../../lookup_plugins/lit_controller_vault_password.py"
-          - encrypt
-          - "{{ _hetzner_vault_validated_password_file }}"
-          - "{{ _management_backup_ciphertext }}"
+    - name: Fetch into memory and persist only controller-encrypted ciphertext
+      lit_encrypted_backup:
+        src: "{{ _management_backup_file }}"
+        dest: "{{ _management_backup_ciphertext }}"
+        password_file: "{{ _hetzner_vault_validated_password_file }}"
       register: _management_backup_encrypt_result
       changed_when: true
       no_log: true
@@ -365,13 +338,3 @@
       ansible.builtin.file:
         path: "{{ _management_backup_readback }}"
         state: absent
-
-    - name: Remove incomplete controller backup artifact
-      delegate_to: localhost
-      become: false
-      ansible.builtin.file:
-        path: "{{ _management_backup_ciphertext }}"
-        state: absent
-      when: >-
-        _management_backup_encrypt_result is not defined or
-        _management_backup_encrypt_result is failed

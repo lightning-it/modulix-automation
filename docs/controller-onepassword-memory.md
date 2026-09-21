@@ -54,23 +54,27 @@ The shared selector clears backend-specific intermediate facts on both success
 and failure. Consumers use only `_hetzner_hashicorp_vault_auth`; the shared
 transport close lifecycle clears this output and both intermediate facts before
 attempting socket removal, including for OS, TLS, migration and recovery callers.
+The TLS custody caller also clears its own copied authentication mappings and
+secret-bearing Vault responses before closing the transport, even on failure.
 The Raft snapshot caller uses the same backend-neutral authentication contract.
 AppRole authentication is not backup encryption custody: the backup runbook
 still requires its existing Ansible Vault password-file contract. A shared
 validator used by both legacy authentication and backup checks canonical,
 symlink-free protected parent directories, a distinct readable regular file,
 root/controller ownership, single link, 0400/0600 mode, and 1-byte-to-1-MiB size.
-Backup validates before secret reads/dumps. At encryption the helper opens and
-validates the password again and reads only that exact open descriptor. The
-pinned Ansible Vault library encrypts in the same helper process, with core dumps
-disabled: no child process can retain an inherited password handle. The backup
-runbook invokes the trusted running controller's `ansible_playbook_python` with
-`-I`, not a PATH lookup or a hard-coded image filesystem path. The memory-profile
-launcher itself still uses its explicitly pinned EE executable contract.
-The backup
-file is also opened descriptor-relatively without following symlinks in its
-private directory and written through that descriptor, with mode 0600. Replacing
-the password pathname or its parent cannot redirect that read. The early metadata
+Backup validates before secret reads/dumps. Its playbook-adjacent controller
+action validates and holds the password descriptor and exclusively reserves a
+new 0600 output in a no-follow private directory before reading the remote dump.
+The dump is slurped into controller memory and encrypted there by the pinned
+Ansible Vault library; only ciphertext is written through the reserved descriptor.
+No plaintext controller fetch file, secret-bearing module argument, encryption
+subprocess or inherited password handle is used. Existing destination files,
+hardlinks and symlinks are rejected before the remote read. Failures can leave
+an empty or partial ciphertext file for diagnosis, never a plaintext artifact;
+there is no automatic retry or pathname-based cleanup of that reserved output.
+Replacing the password pathname or its parent cannot redirect its read, and
+replacing the output parent cannot redirect the checked descriptor's write.
+The memory-profile launcher retains its pinned EE executable contract. The early metadata
 lookup is only a preflight, not a promise about a later pathname open. The
 legacy backend still uses Ansible's initially loaded Vault secret; its added
 metadata preflight does not replace that existing decryption mechanism.

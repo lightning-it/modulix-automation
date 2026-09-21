@@ -324,6 +324,94 @@ class ControllerCredentialTests(unittest.TestCase):
             memory[3]["ansible.builtin.assert"]["that"][0],
         )
 
+    def test_tls_caller_clears_copied_credentials_on_success_and_failure(self):
+        source = (
+            ROOT / "runbooks/50-applications/wunderbox/20-management-tls-custody.yml"
+        )
+        play = yaml.safe_load(source.read_text())[0]
+        lifecycle = next(t for t in play["tasks"] if "always" in t)
+        cleanup = lifecycle["always"][0]
+        facts = cleanup["ansible.builtin.set_fact"]
+        for name in (
+            "_management_tls_issuer_resolved_auth",
+            "_management_tls_custody_resolved_auth",
+            "_management_tls_logins",
+        ):
+            self.assertEqual(facts[name], {})
+        self.assertTrue(cleanup["no_log"])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plays = []
+            for fail in (False, True):
+                plays.append(
+                    {
+                        "hosts": "localhost",
+                        "gather_facts": False,
+                        "tasks": [
+                            {
+                                "ansible.builtin.set_fact": {
+                                    k: {"secret_id": "synthetic"} for k in facts
+                                },
+                                "no_log": True,
+                            },
+                            {
+                                "block": [
+                                    {
+                                        "block": [
+                                            {
+                                                "ansible.builtin.fail": {
+                                                    "msg": "synthetic failure"
+                                                },
+                                                "when": fail,
+                                            }
+                                        ],
+                                        "always": [
+                                            cleanup,
+                                            {
+                                                "ansible.builtin.fail": {
+                                                    "msg": "synthetic close failure"
+                                                },
+                                                "when": fail,
+                                            },
+                                        ],
+                                    }
+                                ],
+                                "rescue": [
+                                    {
+                                        "ansible.builtin.debug": {
+                                            "msg": "expected synthetic failure"
+                                        }
+                                    }
+                                ],
+                            },
+                            {
+                                "ansible.builtin.assert": {
+                                    "that": [f"{k} == {v!r}" for k, v in facts.items()]
+                                }
+                            },
+                        ],
+                    }
+                )
+            test = root / "tls-cleanup.yml"
+            test.write_text(yaml.safe_dump(plays))
+            result = subprocess.run(
+                [
+                    "/opt/app-root/bin/ansible-playbook",
+                    "-i",
+                    "localhost,",
+                    "-c",
+                    "local",
+                    str(test),
+                ],
+                env=dict(
+                    os.environ, ANSIBLE_CONFIG=str(ROOT / "controller-onepassword.cfg")
+                ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_all_shared_auth_callers_own_always_cleanup(self):
         checked = []
 

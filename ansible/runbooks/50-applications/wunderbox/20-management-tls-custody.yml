@@ -242,10 +242,26 @@
           when: _management_tls_action in ['apply', 'readback']
 
       always:
-        - name: Forget short-lived Vault tokens
+        - name: Forget short-lived Vault tokens and caller-owned secret responses
           ansible.builtin.set_fact:
             _management_tls_issuer_token: ""
             _management_tls_custody_token: ""
+            _management_tls_issuer_resolved_auth: {}
+            _management_tls_custody_resolved_auth: {}
+            _management_tls_logins: {}
+            _management_tls_capabilities: {}
+            _management_tls_existing_kv: {}
+            _management_tls_existing_data: {}
+            _management_tls_issued: {}
+            _management_tls_issued_data: {}
+            _management_tls_kv_write: {}
+            _management_tls_kv_readback: {}
+            _management_tls_stored: {}
+            _management_tls_existing_key_info: {}
+            _management_tls_issued_key_info: {}
+            _management_tls_stored_key_info: {}
+            _management_tls_intermediate_readback: {}
+            _management_tls_root_readback: {}
           no_log: true
 
         - name: Close the inventory-declared controller Vault transport

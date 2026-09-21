@@ -1,12 +1,13 @@
 """Existing password-file custody checks; synthetic metadata fixtures only."""
 
+import base64
 import importlib.util
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 import yaml
@@ -18,43 +19,182 @@ SPEC = importlib.util.spec_from_file_location(
 )
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+ACTION_PATH = (
+    ROOT / "runbooks/50-applications/wunderbox/action_plugins/lit_encrypted_backup.py"
+)
+ACTION_SPEC = importlib.util.spec_from_file_location("encrypted_backup", ACTION_PATH)
+ACTION = importlib.util.module_from_spec(ACTION_SPEC)
+ACTION_SPEC.loader.exec_module(ACTION)
 
 
 class PasswordCustodyTests(unittest.TestCase):
-    def test_backup_runbook_invokes_atomic_encryptor(self):
+    def test_backup_runbook_invokes_memory_encryptor_in_real_ansible(self):
         runbook = ROOT / "runbooks/50-applications/wunderbox/31-management-backup.yml"
         tasks = yaml.safe_load(runbook.read_text())[0]["tasks"]
         task = next(
             t for t in tasks if "_management_backup_encrypt_result" == t.get("register")
         )
         self.assertTrue(task["no_log"])
-        argv = task["ansible.builtin.command"]["argv"]
-        self.assertEqual(argv[:2], ["{{ ansible_playbook_python }}", "-I"])
-        helper = Path(argv[2].replace("{{ playbook_dir }}", str(runbook.parent)))
-        self.assertEqual(helper.resolve(), Path(MODULE.__file__).resolve())
+        self.assertIn("lit_encrypted_backup", task)
+        self.assertFalse(any("ansible.builtin.fetch" in t for t in tasks))
+        self.assertNotIn("delegate_to", task)  # slurp must read the managed host
+        self.assertEqual(ACTION.HELPER, Path(MODULE.__file__))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            password = root / "password"
+            password.write_bytes(b"synthetic-password")
+            password.chmod(0o600)
+            source = root / "remote-dump"
+            source.write_bytes(b"synthetic-content")
+            backup = root / "new-private-directory" / "backup"
+            play = root / "test.yml"
+            play.write_text(
+                yaml.safe_dump(
+                    [
+                        {
+                            "hosts": "localhost",
+                            "gather_facts": False,
+                            "tasks": [
+                                {
+                                    "lit_encrypted_backup": {
+                                        "src": str(source),
+                                        "dest": str(backup),
+                                        "password_file": str(password),
+                                    },
+                                    "no_log": True,
+                                }
+                            ],
+                        }
+                    ]
+                )
+            )
+            result = subprocess.run(
+                [
+                    "/opt/app-root/bin/ansible-playbook",
+                    "-i",
+                    "localhost,",
+                    "-c",
+                    "local",
+                    str(play),
+                ],
+                env=dict(
+                    os.environ,
+                    ANSIBLE_CONFIG=str(ROOT / "controller-onepassword.cfg"),
+                    ANSIBLE_ACTION_PLUGINS=str(ACTION_PATH.parent),
+                ),
+                capture_output=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn(b"synthetic-content", result.stdout + result.stderr)
+            vault = VaultLib([("default", VaultSecret(b"synthetic-password"))])
+            self.assertEqual(vault.decrypt(backup.read_bytes()), b"synthetic-content")
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(backup.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_memory_fetch_rejects_existing_destination_and_symlink_parent(self):
+        for kind in ("symlink", "hardlink", "regular", "parent-symlink"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                password = root / "password"
+                password.write_bytes(b"synthetic-password")
+                password.chmod(0o600)
+                victim = root / "victim"
+                victim.write_bytes(b"unchanged")
+                parent = root / "backups"
+                parent.mkdir(mode=0o700)
+                backup = parent / "backup"
+                if kind == "symlink":
+                    backup.symlink_to(victim)
+                elif kind == "hardlink":
+                    os.link(victim, backup)
+                elif kind == "regular":
+                    backup.write_bytes(b"unchanged")
+                else:
+                    parent.rmdir()
+                    parent.symlink_to(root, target_is_directory=True)
+                action = object.__new__(ACTION.ActionModule)
+                action._task = SimpleNamespace(
+                    args={
+                        "src": "/synthetic/remote",
+                        "dest": str(backup),
+                        "password_file": str(password),
+                    }
+                )
+                with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
+                    with mock.patch.object(action, "_execute_module") as fetch:
+                        result = action.run(task_vars={})
+                self.assertTrue(result["failed"])
+                fetch.assert_not_called()
+                self.assertEqual(victim.read_bytes(), b"unchanged")
+
+    def test_memory_fetch_uses_open_inode_after_parent_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            password = root / "password"
+            password.write_bytes(b"synthetic-password")
+            password.chmod(0o600)
+            parent = root / "backups"
+            backup = parent / "dump"
+            action = object.__new__(ACTION.ActionModule)
+            action._task = SimpleNamespace(
+                args={
+                    "src": "/synthetic/remote",
+                    "dest": str(backup),
+                    "password_file": str(password),
+                }
+            )
+
+            def swap(**kwargs):
+                self.assertEqual(backup.read_bytes(), b"")
+                parent.rename(root / "retired")
+                parent.mkdir(mode=0o700)
+                backup.write_bytes(b"unchanged")
+                return {
+                    "encoding": "base64",
+                    "content": base64.b64encode(b"payload").decode(),
+                }
+
+            with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
+                with mock.patch.object(action, "_execute_module", side_effect=swap):
+                    result = action.run(task_vars={})
+            self.assertNotIn("failed", result)
+            self.assertEqual(backup.read_bytes(), b"unchanged")
+            vault = VaultLib([("default", VaultSecret(b"synthetic-password"))])
+            self.assertEqual(
+                vault.decrypt((root / "retired/dump").read_bytes()), b"payload"
+            )
+
+    def test_memory_fetch_failure_is_redacted_and_never_writes_plaintext(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             password = root / "password"
             password.write_bytes(b"synthetic-password")
             password.chmod(0o600)
             backup = root / "backup"
-            backup.write_bytes(b"synthetic-content")
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    argv[1],
-                    str(helper),
-                    "encrypt",
-                    str(password),
-                    str(backup),
-                ],
-                capture_output=True,
-                timeout=30,
+            action = object.__new__(ACTION.ActionModule)
+            action._task = SimpleNamespace(
+                args={
+                    "src": "/synthetic/remote",
+                    "dest": str(backup),
+                    "password_file": str(password),
+                }
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout, b"")
-            vault = VaultLib([("default", VaultSecret(b"synthetic-password"))])
-            self.assertEqual(vault.decrypt(backup.read_bytes()), b"synthetic-content")
+            with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
+                with mock.patch.object(
+                    action,
+                    "_execute_module",
+                    return_value={
+                        "failed": True,
+                        "msg": "synthetic-secret",
+                        "content": "synthetic-secret",
+                    },
+                ):
+                    result = action.run(task_vars={})
+            self.assertTrue(result["failed"])
+            self.assertTrue(result["changed"])
+            self.assertNotIn("synthetic-secret", str(result))
+            self.assertEqual(backup.read_bytes(), b"")
 
     def test_encryption_consumes_checked_inode_after_path_or_parent_swap(self):
         actual_consumer = MODULE.encrypt_from_descriptor
