@@ -1,7 +1,10 @@
 # Controller AppRole from an existing 1Password item
 
-The default backend remains `ansible_vault`, with the original encrypted-file
-checks unchanged. `hashicorp_vault_controller_auth.backend: onepassword_memory`
+The default backend remains `ansible_vault`. Its existing encrypted-document
+checks are retained, with an added password-custody preflight before opening
+the tunnel and shared cleanup of backend-specific credential facts afterward.
+These are intentional lifecycle changes, not byte-for-byte preservation.
+`hashicorp_vault_controller_auth.backend: onepassword_memory`
 is an explicit alternative for a trusted desktop-to-Linux-EE transport. There is
 no automatic fallback or credential generation.
 
@@ -61,6 +64,10 @@ Backup validates before secret reads/dumps. At encryption the helper opens and
 validates the password again and reads only that exact open descriptor. The
 pinned Ansible Vault library encrypts in the same helper process, with core dumps
 disabled: no child process can retain an inherited password handle. The backup
+runbook invokes the trusted running controller's `ansible_playbook_python` with
+`-I`, not a PATH lookup or a hard-coded image filesystem path. The memory-profile
+launcher itself still uses its explicitly pinned EE executable contract.
+The backup
 file is also opened descriptor-relatively without following symlinks in its
 private directory and written through that descriptor, with mode 0600. Replacing
 the password pathname or its parent cannot redirect that read. The early metadata

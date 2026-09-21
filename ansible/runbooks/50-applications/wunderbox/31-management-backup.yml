@@ -247,7 +247,7 @@
       become: false
       ansible.builtin.command:
         argv:
-          - /opt/app-root/bin/python3
+          - "{{ ansible_playbook_python }}"
           - -I
           - "{{ playbook_dir }}/../../../lookup_plugins/lit_controller_vault_password.py"
           - encrypt

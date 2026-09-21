@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -28,7 +29,7 @@ class PasswordCustodyTests(unittest.TestCase):
         )
         self.assertTrue(task["no_log"])
         argv = task["ansible.builtin.command"]["argv"]
-        self.assertEqual(argv[:2], ["/opt/app-root/bin/python3", "-I"])
+        self.assertEqual(argv[:2], ["{{ ansible_playbook_python }}", "-I"])
         helper = Path(argv[2].replace("{{ playbook_dir }}", str(runbook.parent)))
         self.assertEqual(helper.resolve(), Path(MODULE.__file__).resolve())
         with tempfile.TemporaryDirectory() as directory:
@@ -39,7 +40,14 @@ class PasswordCustodyTests(unittest.TestCase):
             backup = root / "backup"
             backup.write_bytes(b"synthetic-content")
             result = subprocess.run(
-                [*argv[:2], str(helper), "encrypt", str(password), str(backup)],
+                [
+                    sys.executable,
+                    argv[1],
+                    str(helper),
+                    "encrypt",
+                    str(password),
+                    str(backup),
+                ],
                 capture_output=True,
                 timeout=30,
             )
