@@ -191,7 +191,38 @@ class LookupModule(LookupBase):
             ) from None
 
 
-def child_environment(fd):
+def validated_agent_socket(path):
+    # The trusted outer transport opts in explicitly; ambient agent access is
+    # never enough. This capability is for the trusted Ansible invocation, not
+    # a sandbox separating mutually untrusted tasks within one playbook.
+    if not isinstance(path, str) or not os.path.isabs(path):
+        raise ValueError("absolute managed SSH agent socket required")
+    if os.path.realpath(path) != path:
+        raise ValueError("canonical managed SSH agent socket required")
+    for parent in Path(path).parents:
+        info = parent.lstat()
+        sticky_tmp = (
+            str(parent) == "/tmp"
+            and info.st_uid == 0
+            and stat.S_IMODE(info.st_mode) == 0o1777
+        )
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid not in (0, os.geteuid())
+            or (info.st_mode & 0o022 and not sticky_tmp)
+        ):
+            raise ValueError("protected SSH agent parent required")
+    info = os.lstat(path)
+    if (
+        not stat.S_ISSOCK(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or info.st_mode & 0o077
+    ):
+        raise ValueError("private owner-controlled SSH agent socket required")
+    return path
+
+
+def child_environment(fd, agent_socket=None):
     # Do not forward OP_*, VAULT_*, cloud tokens, loader variables or arbitrary
     # Ansible overrides. These public runtime selectors are the complete list.
     safe_names = {
@@ -201,9 +232,10 @@ def child_environment(fd):
         "LC_ALL",
         "LC_CTYPE",
         "TMPDIR",
-        "SSH_AUTH_SOCK",
     }
     env = {key: value for key, value in os.environ.items() if key in safe_names}
+    if agent_socket is not None:
+        env["SSH_AUTH_SOCK"] = validated_agent_socket(agent_socket)
     env.update(
         **{FD_ENV: str(fd)},
         ANSIBLE_NO_LOG="true",
@@ -252,6 +284,12 @@ def interrupted(signum, frame):
 def launch(args):
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     signal.signal(signal.SIGTERM, interrupted)
+    agent_socket = None
+    if args[:1] == ["--ssh-agent-socket"]:
+        if len(args) < 4 or args[2] != "--":
+            raise ValueError("explicit managed SSH transport arguments required")
+        agent_socket = validated_agent_socket(args[1])
+        args = args[2:]
     if not args or args[0] != "--" or len(args) == 1:
         raise ValueError("public playbook arguments required")
     if any(
@@ -268,7 +306,9 @@ def launch(args):
         with os.fdopen(os.dup(fd), "wb") as output:
             output.write(payload)
         fcntl.fcntl(fd, fcntl.F_ADD_SEALS, SEALS)
-        rc = run_child(["ansible-playbook", *args[1:]], child_environment(fd), fd)
+        rc = run_child(
+            ["ansible-playbook", *args[1:]], child_environment(fd, agent_socket), fd
+        )
         print(json.dumps({"ansible_rc": rc, "secret_output": False}))
         return rc
     finally:

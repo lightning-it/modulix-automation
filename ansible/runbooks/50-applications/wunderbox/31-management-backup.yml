@@ -113,61 +113,83 @@
       ansible.builtin.meta: end_play
       when: wunderbox_management_backup_action | default('plan') == 'plan'
 
-    - name: Resolve scoped controller HashiCorp Vault authentication
-      ansible.builtin.include_tasks: >-
-        ../../../00-common/tasks/resolve-hashicorp-vault-auth.yml
-      no_log: true
+    - name: Require separate backup encryption custody before reading secrets
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') | length > 0
+        fail_msg: >-
+          Database backup requires the existing Ansible Vault encryption custody.
+          The memory-only AppRole profile does not supply a backup encryption key.
+        quiet: true
 
   tasks:
-    - name: Read the service database credential from Vault
-      ansible.builtin.include_role:
-        name: lit.supplementary.vault_secret_bundle
-      vars:
-        vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
-        vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
-        vault_secret_bundle_kv_path: >-
-          {{ wunderbox_management_vault_paths[_management_backup_selected] }}
-        vault_secret_bundle_validate_certs: true
-        vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
-        vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
-        vault_secret_bundle_auth_mount_point: >-
-          {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
-        vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
-        vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
-        vault_secret_bundle_generate_missing: false
-        vault_secret_bundle_items: [{name: db_password}]
-      no_log: true
+    - name: Read backup credentials through a caller-owned Vault transport
+      block:
+        - name: Resolve scoped controller HashiCorp Vault authentication
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+          no_log: true
 
-    - name: Capture the service database credential
-      ansible.builtin.set_fact:
-        management_backup_db_secret: "{{ vault_secret_bundle_result }}"
-      no_log: true
+        - name: Read the service database credential from Vault
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_secret_bundle
+          vars:
+            vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
+            vault_secret_bundle_kv_path: >-
+              {{ wunderbox_management_vault_paths[_management_backup_selected] }}
+            vault_secret_bundle_validate_certs: true
+            vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
+            vault_secret_bundle_auth_mount_point: >-
+              {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+            vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            vault_secret_bundle_generate_missing: false
+            vault_secret_bundle_items: [{name: db_password}]
+          no_log: true
 
-    - name: Read Object Storage credentials from Vault
-      ansible.builtin.include_role:
-        name: lit.supplementary.vault_secret_bundle
-      vars:
-        vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
-        vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
-        vault_secret_bundle_kv_path: >-
-          {{ wunderbox_management_vault_paths.object_storage }}
-        vault_secret_bundle_validate_certs: true
-        vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
-        vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
-        vault_secret_bundle_auth_mount_point: >-
-          {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
-        vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
-        vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
-        vault_secret_bundle_generate_missing: false
-        vault_secret_bundle_items:
-          - {name: access_key}
-          - {name: secret_key}
-      no_log: true
+        - name: Capture the service database credential
+          ansible.builtin.set_fact:
+            management_backup_db_secret: "{{ vault_secret_bundle_result }}"
+          no_log: true
 
-    - name: Capture the Object Storage credentials
-      ansible.builtin.set_fact:
-        management_backup_s3_secret: "{{ vault_secret_bundle_result }}"
-      no_log: true
+        - name: Read Object Storage credentials from Vault
+          ansible.builtin.include_role:
+            name: lit.supplementary.vault_secret_bundle
+          vars:
+            vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
+            vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
+            vault_secret_bundle_kv_path: >-
+              {{ wunderbox_management_vault_paths.object_storage }}
+            vault_secret_bundle_validate_certs: true
+            vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+            vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
+            vault_secret_bundle_auth_mount_point: >-
+              {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+            vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+            vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+            vault_secret_bundle_generate_missing: false
+            vault_secret_bundle_items:
+              - {name: access_key}
+              - {name: secret_key}
+          no_log: true
+
+        - name: Capture the Object Storage credentials
+          ansible.builtin.set_fact:
+            management_backup_s3_secret: "{{ vault_secret_bundle_result }}"
+          no_log: true
+
+      always:
+        - name: Forget resolved controller Vault authentication
+          ansible.builtin.set_fact:
+            _hetzner_hashicorp_vault_auth: {}
+            _hetzner_vault_memory_auth: {}
+          no_log: true
+
+        - name: Close the inventory-declared controller Vault transport
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
 
     - name: Arm cleanup for the transient host database dump
       ansible.builtin.debug:

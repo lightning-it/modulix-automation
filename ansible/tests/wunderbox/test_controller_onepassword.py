@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import tempfile
 import unittest
@@ -59,6 +60,7 @@ class ControllerCredentialTests(unittest.TestCase):
             "AWS_SECRET_ACCESS_KEY": "synthetic",
             "LD_PRELOAD": "synthetic",
             "ANSIBLE_CONFIG": "/untrusted",
+            "SSH_AUTH_SOCK": "/ambient-agent-not-authorized",
         }
         with patch.dict(os.environ, unsafe):
             env = MODULE.child_environment(42)
@@ -66,6 +68,115 @@ class ControllerCredentialTests(unittest.TestCase):
             self.assertNotEqual(env.get(key), unsafe[key])
         self.assertEqual(env[MODULE.FD_ENV], "42")
         self.assertEqual(env["ANSIBLE_NO_LOG"], "true")
+
+    def test_agent_requires_explicit_private_owned_socket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "agent")
+            with socket.socket(socket.AF_UNIX) as agent:
+                agent.bind(path)
+                os.chmod(path, 0o600)
+                with patch.dict(os.environ, SSH_AUTH_SOCK="/ambient-other-agent"):
+                    self.assertNotIn("SSH_AUTH_SOCK", MODULE.child_environment(42))
+                    self.assertEqual(
+                        MODULE.child_environment(42, path)["SSH_AUTH_SOCK"], path
+                    )
+                alias = Path(directory) / "alias"
+                alias.symlink_to(path)
+                regular = Path(directory) / "regular"
+                regular.touch(mode=0o600)
+                for invalid in ("relative", str(alias), str(regular)):
+                    with self.subTest(path=invalid), self.assertRaises(ValueError):
+                        MODULE.child_environment(42, invalid)
+                with patch.object(MODULE.os, "geteuid", return_value=os.geteuid() + 1):
+                    with self.assertRaises(ValueError):
+                        MODULE.child_environment(42, path)
+                os.chmod(path, 0o666)
+                with self.assertRaises(ValueError):
+                    MODULE.child_environment(42, path)
+                os.chmod(path, 0o600)
+                os.chmod(directory, 0o777)
+                with self.assertRaises(ValueError):
+                    MODULE.child_environment(42, path)
+                os.chmod(directory, 0o700)
+
+    def test_backup_vault_lifecycle_cleanup_on_success_and_each_failure(self):
+        runbook = ROOT / "runbooks/50-applications/wunderbox/31-management-backup.yml"
+        play = yaml.safe_load(runbook.read_text())[0]
+        lifecycle = play["tasks"][0]
+        self.assertEqual(len(lifecycle["block"]), 5)
+        resolver = lifecycle["block"][0]["ansible.builtin.include_tasks"]
+        self.assertTrue((runbook.parent / resolver).resolve().is_file())
+        self.assertIn("ANSIBLE_VAULT_PASSWORD_FILE", str(play["pre_tasks"][-1]))
+        self.assertIn("end_play", str(play["pre_tasks"][-2]))
+        self.assertFalse(any("resolve-hashicorp" in str(t) for t in play["pre_tasks"]))
+        self.assertNotIn("vault_secret_bundle", str(play["tasks"][1:]))
+        close = lifecycle["always"][-1]["ansible.builtin.include_tasks"]
+        close_path = (runbook.parent / close).resolve()
+        self.assertTrue(close_path.is_file())
+        # Exercise the actual runbook's block/always structure and real cleanup
+        # include, replacing only network/secret operations with synthetic tasks.
+        plays = []
+        for failure_index in (-1, 0, 1, 2, 3, 4):
+            candidate = copy.deepcopy(lifecycle)
+            candidate["block"] = [
+                {
+                    "name": task["name"],
+                    "ansible.builtin.assert": {"that": index != failure_index},
+                }
+                for index, task in enumerate(candidate["block"])
+            ]
+            candidate["always"][-1]["ansible.builtin.include_tasks"] = str(close_path)
+            plays.append(
+                {
+                    "hosts": "localhost",
+                    "gather_facts": False,
+                    "tasks": [
+                        {
+                            "ansible.builtin.set_fact": {
+                                "_hetzner_hashicorp_vault_auth": {"synthetic": True},
+                                "_hetzner_vault_memory_auth": {"synthetic": True},
+                                "_hetzner_vault_ssh_tunnel_ready": True,
+                                "_hetzner_vault_tunnel_control_path_validated": False,
+                                "synthetic_failure_seen": False,
+                            }
+                        },
+                        {
+                            "block": [candidate],
+                            "rescue": [
+                                {
+                                    "ansible.builtin.set_fact": {
+                                        "synthetic_failure_seen": True
+                                    }
+                                }
+                            ],
+                        },
+                        {
+                            "ansible.builtin.assert": {
+                                "that": [
+                                    "_hetzner_hashicorp_vault_auth == {}",
+                                    "_hetzner_vault_memory_auth == {}",
+                                    "not _hetzner_vault_ssh_tunnel_ready",
+                                    "_hetzner_vault_tunnel_control_path is none",
+                                    f"synthetic_failure_seen == {failure_index >= 0}",
+                                ]
+                            }
+                        },
+                    ],
+                }
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cleanup.yml"
+            path.write_text(yaml.safe_dump(plays))
+            env = MODULE.child_environment(42)
+            env.pop(MODULE.FD_ENV)
+            result = subprocess.run(
+                ["ansible-playbook", "-i", "localhost,", "-c", "local", str(path)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=90,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_timeout_terminates_descriptor_holding_process_group(self):
         fd = os.memfd_create(MODULE.MEMORY_NAME, os.MFD_ALLOW_SEALING)
@@ -220,7 +331,8 @@ class ControllerCredentialTests(unittest.TestCase):
                                     "no_log": True,
                                     "ansible.builtin.assert": {
                                         "that": [
-                                            "(query('lit_controller_onepassword', contract, ca_path=ca, project_root=root) | first).role_id == 'synthetic-role-000000000'"
+                                            "(query('lit_controller_onepassword', contract, ca_path=ca, project_root=root) | first).role_id == 'synthetic-role-000000000'",
+                                            "lookup('ansible.builtin.env', 'SSH_AUTH_SOCK') == ''",
                                         ]
                                     },
                                 }
@@ -235,6 +347,7 @@ class ControllerCredentialTests(unittest.TestCase):
                 os.environ,
                 ANSIBLE_CONFIG=str(config),
                 ANSIBLE_LOOKUP_PLUGINS=str(PLUGIN.parent),
+                SSH_AUTH_SOCK="/ambient-agent-must-not-reach-the-child",
             )
             result = subprocess.run(
                 [
@@ -256,6 +369,42 @@ class ControllerCredentialTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(json.loads(result.stdout)["ansible_rc"], 0)
             self.assertNotIn("synthetic-secret", result.stdout + result.stderr)
+            agent_path = str(root / "agent.sock")
+            with socket.socket(socket.AF_UNIX) as agent:
+                agent.bind(agent_path)
+                os.chmod(agent_path, 0o600)
+                body = yaml.safe_load(play.read_text())
+                body[0]["tasks"][0]["ansible.builtin.assert"]["that"][
+                    1
+                ] = f"lookup('ansible.builtin.env', 'SSH_AUTH_SOCK') == '{agent_path}'"
+                play.write_text(yaml.safe_dump(body))
+                opted_in = subprocess.run(
+                    [
+                        "python3",
+                        str(PLUGIN),
+                        "--ssh-agent-socket",
+                        agent_path,
+                        "--",
+                        "-i",
+                        "localhost,",
+                        "-c",
+                        "local",
+                        str(play),
+                    ],
+                    input=json.dumps(item),
+                    text=True,
+                    capture_output=True,
+                    env=env,
+                    timeout=45,
+                )
+                self.assertEqual(
+                    opted_in.returncode, 0, opted_in.stdout + opted_in.stderr
+                )
+                self.assertNotIn("synthetic-secret", opted_in.stdout + opted_in.stderr)
+            body[0]["tasks"][0]["ansible.builtin.assert"]["that"][
+                1
+            ] = "lookup('ansible.builtin.env', 'SSH_AUTH_SOCK') == ''"
+            play.write_text(yaml.safe_dump(body))
             item["version"] = 2
             rejected = subprocess.run(
                 [
