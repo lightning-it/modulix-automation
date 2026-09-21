@@ -271,6 +271,12 @@ class ControllerCredentialTests(unittest.TestCase):
             self.assertEqual(result, value)
             self.assertTrue(result.__UNSAFE__)
 
+    def test_json_numeric_constants_and_overflow_are_rejected(self):
+        for number in ("NaN", "Infinity", "-Infinity", "1e999", "-1e999"):
+            with self.subTest(number=number), self.assertRaises(ValueError):
+                MODULE.decode('{"nested":[' + number + "]}")
+        self.assertEqual(MODULE.decode('{"value":1.25}'), {"value": 1.25})
+
     def test_duplicate_notes_and_json_keys_rejected(self):
         contract, item = fixture()
         item["fields"] *= 2

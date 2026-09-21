@@ -25,6 +25,10 @@ ACTION_PATH = (
 ACTION_SPEC = importlib.util.spec_from_file_location("encrypted_backup", ACTION_PATH)
 ACTION = importlib.util.module_from_spec(ACTION_SPEC)
 ACTION_SPEC.loader.exec_module(ACTION)
+READER_PATH = ACTION_PATH.parent.parent / "library/lit_bounded_slurp.py"
+READER_SPEC = importlib.util.spec_from_file_location("bounded_reader", READER_PATH)
+READER = importlib.util.module_from_spec(READER_SPEC)
+READER_SPEC.loader.exec_module(READER)
 
 
 class PasswordCustodyTests(unittest.TestCase):
@@ -60,6 +64,7 @@ class PasswordCustodyTests(unittest.TestCase):
                                         "src": str(source),
                                         "dest": str(backup),
                                         "password_file": str(password),
+                                        "max_bytes": 1024,
                                     },
                                     "no_log": True,
                                 }
@@ -81,6 +86,7 @@ class PasswordCustodyTests(unittest.TestCase):
                     os.environ,
                     ANSIBLE_CONFIG=str(ROOT / "controller-onepassword.cfg"),
                     ANSIBLE_ACTION_PLUGINS=str(ACTION_PATH.parent),
+                    ANSIBLE_LIBRARY=str(READER_PATH.parent),
                 ),
                 capture_output=True,
                 timeout=30,
@@ -119,6 +125,7 @@ class PasswordCustodyTests(unittest.TestCase):
                         "src": "/synthetic/remote",
                         "dest": str(backup),
                         "password_file": str(password),
+                        "max_bytes": 1024,
                     }
                 )
                 with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
@@ -142,6 +149,7 @@ class PasswordCustodyTests(unittest.TestCase):
                     "src": "/synthetic/remote",
                     "dest": str(backup),
                     "password_file": str(password),
+                    "max_bytes": 1024,
                 }
             )
 
@@ -178,6 +186,7 @@ class PasswordCustodyTests(unittest.TestCase):
                     "src": "/synthetic/remote",
                     "dest": str(backup),
                     "password_file": str(password),
+                    "max_bytes": 1024,
                 }
             )
             with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
@@ -195,6 +204,65 @@ class PasswordCustodyTests(unittest.TestCase):
             self.assertTrue(result["changed"])
             self.assertNotIn("synthetic-secret", str(result))
             self.assertEqual(backup.read_bytes(), b"")
+
+    def test_bounded_reader_rejects_size_growth_symlink_and_fifo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "dump"
+            source.write_bytes(b"01234567")
+            self.assertEqual(READER.read_bounded(str(source), 8), b"01234567")
+            for limit in (0, -1, True, "8", 64 * 1024 * 1024 + 1, 7):
+                with self.subTest(limit=limit), self.assertRaises(ValueError):
+                    READER.read_bounded(str(source), limit)
+            info = source.stat()
+            with mock.patch.object(
+                READER.os,
+                "fstat",
+                return_value=SimpleNamespace(st_mode=info.st_mode, st_size=0),
+            ):
+                with self.assertRaises(ValueError):
+                    READER.read_bounded(str(source), 7)
+            link = source.parent / "link"
+            link.symlink_to(source)
+            fifo = source.parent / "fifo"
+            os.mkfifo(fifo)
+            for invalid in (link, fifo, source.parent):
+                with self.subTest(path=invalid), self.assertRaises(
+                    (ValueError, OSError)
+                ):
+                    READER.read_bounded(str(invalid), 8)
+
+    def test_capacity_failure_precedes_fetch_and_payload_decode(self):
+        for limit in (0, -1, True, "8", 64 * 1024 * 1024 + 1, 3):
+            with self.subTest(limit=limit), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                password = root / "password"
+                password.write_bytes(b"synthetic-password")
+                password.chmod(0o600)
+                backup = root / "dump"
+                action = object.__new__(ACTION.ActionModule)
+                action._task = SimpleNamespace(
+                    args={
+                        "src": "/remote",
+                        "dest": str(backup),
+                        "password_file": str(password),
+                        "max_bytes": limit,
+                    }
+                )
+                with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
+                    with mock.patch.object(
+                        action,
+                        "_execute_module",
+                        return_value={"encoding": "base64", "content": "AAAAAA=="},
+                    ) as fetch:
+                        with mock.patch.object(ACTION.base64, "b64decode") as decoder:
+                            result = action.run(task_vars={})
+                self.assertTrue(result["failed"])
+                decoder.assert_not_called()
+                if limit != 3:
+                    fetch.assert_not_called()
+                    self.assertFalse(backup.exists())
+                else:
+                    self.assertEqual(backup.read_bytes(), b"")
 
     def test_encryption_consumes_checked_inode_after_path_or_parent_swap(self):
         actual_consumer = MODULE.encrypt_from_descriptor

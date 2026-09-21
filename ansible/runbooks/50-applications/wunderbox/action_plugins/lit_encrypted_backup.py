@@ -26,8 +26,11 @@ class ActionModule(ActionBase):
         try:
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
             args = self._task.args
-            if set(args) != {"src", "dest", "password_file"}:
+            if set(args) != {"src", "dest", "password_file", "max_bytes"}:
                 raise ValueError("exact backup inputs required")
+            limit = args["max_bytes"]
+            if type(limit) is not int or not 0 < limit <= 64 * 1024 * 1024:
+                raise ValueError("explicit memory capacity limit required")
             # Validate and reserve both descriptors BEFORE any remote read.
             # O_EXCL rejects existing files/symlinks, including hardlinks.
             with CUSTODY.open_protected_file(
@@ -38,14 +41,19 @@ class ActionModule(ActionBase):
                 ) as output_fd:
                     reserved = True
                     fetched = self._execute_module(
-                        module_name="ansible.builtin.slurp",
-                        module_args={"src": args["src"]},
+                        module_name="lit_bounded_slurp",
+                        module_args={"src": args["src"], "max_bytes": limit},
                         task_vars=task_vars,
                         tmp=tmp,
                     )
                     if fetched.get("failed") or fetched.get("encoding") != "base64":
                         raise ValueError("backup read failed")
+                    if len(fetched["content"]) > 4 * ((limit + 2) // 3):
+                        raise ValueError("encoded backup exceeds capacity contract")
                     plaintext = base64.b64decode(fetched["content"], validate=True)
+                    if len(plaintext) > limit:
+                        raise ValueError("backup exceeds capacity contract")
+                    del fetched
                     CUSTODY.write_encrypted_payload(password_fd, output_fd, plaintext)
             return {"changed": True, "_ansible_no_log": True}
         except Exception:

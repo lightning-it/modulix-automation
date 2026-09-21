@@ -82,6 +82,9 @@
           - _management_backup_contract.get('database', '') | trim | length > 0
           - _management_backup_contract.get('database_user', '') | trim | length > 0
           - _management_backup_contract.get('container', '') | trim | length > 0
+          - _management_backup_config.get('max_dump_bytes', 0) is integer
+          - _management_backup_config.get('max_dump_bytes', 0) > 0
+          - _management_backup_config.get('max_dump_bytes', 0) <= 67108864
           - _management_backup_config.get('versioning_required', false) is sameas true
           - _management_backup_config.get('object_lock_mode', '') == 'COMPLIANCE'
           - >-
@@ -106,7 +109,8 @@
           Use the exact host, select keycloak, netbox, or guacamole, and set
           wunderbox_management_backup_action=backup only for a protected S3
           target with client-side encryption custody, versioning, Object Lock,
-          and Vault-backed Object Storage credentials.
+          Vault-backed Object Storage credentials, and an explicit max_dump_bytes
+          capacity between 1 and 67108864 bytes.
         quiet: true
 
     - name: End after the read-only backup plan
@@ -226,6 +230,7 @@
         src: "{{ _management_backup_file }}"
         dest: "{{ _management_backup_ciphertext }}"
         password_file: "{{ _hetzner_vault_validated_password_file }}"
+        max_bytes: "{{ _management_backup_config.max_dump_bytes }}"
       register: _management_backup_encrypt_result
       changed_when: true
       no_log: true

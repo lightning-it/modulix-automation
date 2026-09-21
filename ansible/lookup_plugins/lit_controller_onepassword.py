@@ -8,6 +8,7 @@ The desktop-side trusted transport must select the approved account and item.
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -43,7 +44,21 @@ def unique_object(pairs):
 
 
 def decode(value):
-    return json.loads(value, object_pairs_hook=unique_object)
+    def reject_constant(value):
+        raise ValueError("non-JSON numeric constant")
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("non-finite JSON number")
+        return result
+
+    return json.loads(
+        value,
+        object_pairs_hook=unique_object,
+        parse_constant=reject_constant,
+        parse_float=finite_float,
+    )
 
 
 def read_item(fd):

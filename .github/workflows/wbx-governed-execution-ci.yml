@@ -77,6 +77,7 @@ jobs:
           python3 -m unittest discover -s ansible/tests/wunderbox -v
           black --check ansible/lookup_plugins/lit_controller_onepassword.py \
             ansible/runbooks/50-applications/wunderbox/action_plugins/lit_encrypted_backup.py \
+            ansible/runbooks/50-applications/wunderbox/library/lit_bounded_slurp.py \
             ansible/lookup_plugins/lit_controller_vault_password.py \
             ansible/tests/controller_onepassword_oci_fixture.py \
             ansible/tests/wunderbox/test_controller_onepassword.py \

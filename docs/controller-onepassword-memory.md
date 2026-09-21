@@ -19,7 +19,9 @@ without secret output, and never retry a mutating playbook automatically.
 The launcher creates a sealed, owner-bound anonymous memory descriptor and
 inherits only its numeric handle into Ansible. It uses the dedicated
 `controller-onepassword.cfg` profile (no legacy password file), disables secret
-logging and disk fact caching, and emits only the Ansible return code. It builds
+logging and disk fact caching, and emits only redacted JSON status metadata:
+the Ansible return code and secret-output flag, or a generic launch-stopped
+marker on failure. It never emits subprocess output or credential contents. It builds
 the child environment from fixed settings, never ambient PATH, HOME, 1Password,
 Vault, cloud or loader values. It uses the pinned EE's absolute executable
 `/opt/app-root/bin/ansible-playbook`, a fixed system PATH and a new private
@@ -65,7 +67,16 @@ root/controller ownership, single link, 0400/0600 mode, and 1-byte-to-1-MiB size
 Backup validates before secret reads/dumps. Its playbook-adjacent controller
 action validates and holds the password descriptor and exclusively reserves a
 new 0600 output in a no-follow private directory before reading the remote dump.
-The dump is slurped into controller memory and encrypted there by the pinned
+The remote bounded reader accepts an explicit inventory
+`wunderbox_management_backup.max_dump_bytes` limit between 1 and 67108864 bytes
+(64 MiB); no implicit capacity default is used. Its descriptor-based read stops
+at limit+1 even if the file grows after stat, rejecting oversized dumps before
+returning their payload. Encoded and decoded lengths are checked again on the
+controller. Operators must size this limit for the actual controller memory
+budget (allow at least 20 times the limit as headroom for JSON, base64 and Vault
+encryption allocations); larger databases need a separately reviewed streaming
+backup path, not a raised hard ceiling or plaintext fallback.
+The bounded dump is read into controller memory and encrypted there by the pinned
 Ansible Vault library; only ciphertext is written through the reserved descriptor.
 No plaintext controller fetch file, secret-bearing module argument, encryption
 subprocess or inherited password handle is used. Existing destination files,
@@ -87,7 +98,8 @@ Its `onepassword` mapping must contain exactly `item_id`, `vault_id`,
 `item_version` (positive integer), `item_title` and `ca_sha256`. The item must be
 the exact Secure Note and contain one JSON `notesPlain` field with the matching
 schema/subject/auth method/role/mount plus the existing `role_id` and `secret_id`.
-Duplicate JSON keys, ambiguous notes, drift and unsealed input fail closed.
+Duplicate JSON keys, non-JSON numeric constants, non-finite numbers, ambiguous
+notes, drift and unsealed input fail closed.
 AppRole strings retain the existing 16–4096-character, no-CR/LF contract,
 including punctuation such as `=`. They are explicitly Ansible-unsafe data;
 template-looking credential text is passed literally, never evaluated.
