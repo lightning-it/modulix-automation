@@ -74,10 +74,6 @@ jobs:
           /usr/bin/python3.11 tests/test_wbx_governed_execution_policy.py
           python3 tests/test_wbx_governed_execution_ci.py
 
-      - name: Run Wunderbox controller credential and runbook contracts
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 -m unittest discover -s ansible/tests/wunderbox -v
           black --check ansible/lookup_plugins/lit_controller_onepassword.py \
             ansible/tests/wunderbox/test_controller_onepassword.py

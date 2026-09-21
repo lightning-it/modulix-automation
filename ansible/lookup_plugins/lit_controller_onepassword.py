@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import resource
+import signal
 import ssl
 import stat
 import subprocess
@@ -190,8 +191,67 @@ class LookupModule(LookupBase):
             ) from None
 
 
+def child_environment(fd):
+    # Do not forward OP_*, VAULT_*, cloud tokens, loader variables or arbitrary
+    # Ansible overrides. These public runtime selectors are the complete list.
+    safe_names = {
+        "PATH",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+        "SSH_AUTH_SOCK",
+    }
+    env = {key: value for key, value in os.environ.items() if key in safe_names}
+    env.update(
+        **{FD_ENV: str(fd)},
+        ANSIBLE_NO_LOG="true",
+        ANSIBLE_DEBUG="false",
+        ANSIBLE_LOG_PATH="/dev/null",
+        ANSIBLE_CACHE_PLUGIN="memory",
+        ANSIBLE_RETRY_FILES_ENABLED="false",
+        ANSIBLE_DISPLAY_ARGS_TO_STDOUT="false",
+        ANSIBLE_STDOUT_CALLBACK="default",
+        PYTHONDONTWRITEBYTECODE="1",
+        PWD=os.getcwd(),
+        ANSIBLE_CONFIG=str(
+            Path(__file__).resolve().parents[1] / "controller-onepassword.cfg"
+        ),
+        ANSIBLE_LOOKUP_PLUGINS=str(Path(__file__).resolve().parent),
+    )
+    return env
+
+
+def run_child(command, env, fd, timeout=1800):
+    child = subprocess.Popen(
+        command,
+        env=env,
+        pass_fds=(fd,),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        return child.wait(timeout=timeout)
+    finally:
+        # Includes forked workers retaining the credential FD, also after a
+        # successful leader exit. The one-shot EE terminates any escaped session.
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        child.wait(timeout=5)
+
+
+def interrupted(signum, frame):
+    raise InterruptedError("controller interrupted")
+
+
 def launch(args):
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    signal.signal(signal.SIGTERM, interrupted)
     if not args or args[0] != "--" or len(args) == 1:
         raise ValueError("public playbook arguments required")
     if any(
@@ -208,35 +268,9 @@ def launch(args):
         with os.fdopen(os.dup(fd), "wb") as output:
             output.write(payload)
         fcntl.fcntl(fd, fcntl.F_ADD_SEALS, SEALS)
-        env = dict(
-            os.environ,
-            **{FD_ENV: str(fd)},
-            ANSIBLE_NO_LOG="true",
-            ANSIBLE_DEBUG="false",
-            ANSIBLE_LOG_PATH="/dev/null",
-            ANSIBLE_CACHE_PLUGIN="memory",
-            ANSIBLE_RETRY_FILES_ENABLED="false",
-            ANSIBLE_DISPLAY_ARGS_TO_STDOUT="false",
-        )
-        env.pop("ANSIBLE_VAULT_PASSWORD_FILE", None)
-        env.pop("ANSIBLE_VAULT_IDENTITY_LIST", None)
-        env["ANSIBLE_CONFIG"] = str(
-            Path(__file__).resolve().parents[1] / "controller-onepassword.cfg"
-        )
-        env["ANSIBLE_LOOKUP_PLUGINS"] = str(Path(__file__).resolve().parent)
-        env["PWD"] = os.getcwd()
-        result = subprocess.run(
-            ["ansible-playbook", *args[1:]],
-            env=env,
-            pass_fds=(fd,),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=1800,
-            check=False,
-        )
-        print(json.dumps({"ansible_rc": result.returncode, "secret_output": False}))
-        return result.returncode
+        rc = run_child(["ansible-playbook", *args[1:]], child_environment(fd), fd)
+        print(json.dumps({"ansible_rc": rc, "secret_output": False}))
+        return rc
     finally:
         os.close(fd)
 
@@ -244,6 +278,6 @@ def launch(args):
 if __name__ == "__main__":
     try:
         sys.exit(launch(sys.argv[1:]))
-    except Exception:
+    except (Exception, KeyboardInterrupt):
         print('{"controller_launch_stopped":true,"secret_output":false}')
         sys.exit(2)

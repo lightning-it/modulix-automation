@@ -11,6 +11,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -50,6 +51,42 @@ def fixture():
 
 
 class ControllerCredentialTests(unittest.TestCase):
+    def test_child_environment_is_allowlisted(self):
+        unsafe = {
+            "OP_SESSION_test": "synthetic",
+            "OP_SERVICE_ACCOUNT_TOKEN": "synthetic",
+            "VAULT_TOKEN": "synthetic",
+            "AWS_SECRET_ACCESS_KEY": "synthetic",
+            "LD_PRELOAD": "synthetic",
+            "ANSIBLE_CONFIG": "/untrusted",
+        }
+        with patch.dict(os.environ, unsafe):
+            env = MODULE.child_environment(42)
+        for key in unsafe:
+            self.assertNotEqual(env.get(key), unsafe[key])
+        self.assertEqual(env[MODULE.FD_ENV], "42")
+        self.assertEqual(env["ANSIBLE_NO_LOG"], "true")
+
+    def test_timeout_terminates_descriptor_holding_process_group(self):
+        fd = os.memfd_create(MODULE.MEMORY_NAME, os.MFD_ALLOW_SEALING)
+        self.addCleanup(os.close, fd)
+        with tempfile.TemporaryDirectory() as directory:
+            pidfile = Path(directory) / "child.pid"
+            code = (
+                "import os,time; from pathlib import Path; "
+                "pid=os.fork(); "
+                f"Path({str(pidfile)!r}).write_text(str(os.getpid())) if pid==0 else None; "
+                "time.sleep(30)"
+            )
+            with self.assertRaises(subprocess.TimeoutExpired):
+                MODULE.run_child(
+                    ["python3", "-c", code], MODULE.child_environment(fd), fd, timeout=1
+                )
+            pid = int(pidfile.read_text())
+            proc = Path(f"/proc/{pid}/stat")
+            if proc.exists():
+                self.assertEqual(proc.read_text().split()[2], "Z")
+
     def test_exact_item(self):
         contract, item = fixture()
         self.assertEqual(
@@ -183,7 +220,7 @@ class ControllerCredentialTests(unittest.TestCase):
                                     "no_log": True,
                                     "ansible.builtin.assert": {
                                         "that": [
-                                            "lookup('lit_controller_onepassword', contract, ca_path=ca, project_root=root).role_id == 'synthetic-role-000000000'"
+                                            "(query('lit_controller_onepassword', contract, ca_path=ca, project_root=root) | first).role_id == 'synthetic-role-000000000'"
                                         ]
                                     },
                                 }

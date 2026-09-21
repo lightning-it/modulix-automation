@@ -16,7 +16,12 @@ without secret output, and never retry a mutating playbook automatically.
 The launcher creates a sealed, owner-bound anonymous memory descriptor and
 inherits only its numeric handle into Ansible. It uses the dedicated
 `controller-onepassword.cfg` profile (no legacy password file), disables secret
-logging and disk fact caching, and emits only the Ansible return code. A failed
+logging and disk fact caching, and emits only the Ansible return code. It builds
+the child environment from an explicit public-runtime allowlist, never ambient
+1Password, Vault, cloud or loader credentials. The child has a separate process
+group, which is killed on exit, timeout or handled interruption. Run this launcher
+as the main process of a one-shot isolated EE: EE teardown also terminates
+processes that deliberately create a different session. A failed
 or timed-out Apply is not proof that no remote changes occurred: follow the
 runbook's rollback/readback procedure, not an automatic retry.
 
