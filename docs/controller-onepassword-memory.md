@@ -75,9 +75,12 @@ The remote bounded reader accepts an explicit inventory
 `wunderbox_management_backup.max_dump_bytes` limit between 1 and 67108864 bytes
 (64 MiB); no implicit capacity default is used. Its descriptor-based read stops
 at limit+1 even if the file grows after stat, rejecting oversized dumps before
-returning their payload. Encoded and decoded lengths are checked again on the
-controller. Operators must size this limit for the actual controller memory
-budget (allow at least 20 times the limit as headroom for JSON, base64 and Vault
+returning their payload. A final stat of the held descriptor must match the
+initial size, modification time and change time, and the read length must match
+that size. Changes fail closed; the producer must supply a completed, immutable
+dump (this check is not a filesystem snapshot). Encoded and decoded lengths are
+checked again on the controller. Operators must size this limit for the actual
+controller memory budget (allow at least 20 times the limit as headroom for JSON, base64 and Vault
 encryption allocations); larger databases need a separately reviewed streaming
 backup path, not a raised hard ceiling or plaintext fallback.
 The bounded dump is read into controller memory and encrypted there by the pinned

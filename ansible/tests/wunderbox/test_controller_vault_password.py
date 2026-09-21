@@ -232,6 +232,44 @@ class PasswordCustodyTests(unittest.TestCase):
                 ):
                     READER.read_bounded(str(invalid), 8)
 
+    def test_bounded_reader_rejects_changes_during_or_after_read(self):
+        for mode in ("grow-during", "grow-after", "shrink-after", "rewrite-after"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory) / "dump"
+                source.write_bytes(b"01234567")
+                original_fstat = os.fstat
+                calls = []
+
+                def mutate_at_boundary(fd):
+                    calls.append(fd)
+                    before = original_fstat(fd)
+                    boundary = 1 if mode == "grow-during" else 2
+                    if len(calls) == boundary:
+                        replacement = {
+                            "grow-during": b"012345678",
+                            "grow-after": b"012345678",
+                            "shrink-after": b"0123",
+                            "rewrite-after": b"abcdefgh",
+                        }[mode]
+                        source.write_bytes(replacement)
+                        os.utime(
+                            source,
+                            ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000),
+                        )
+                    # First stat precedes the injected write; the final stat
+                    # observes it. Growth stays under the explicit capacity.
+                    return before if len(calls) == 1 else original_fstat(fd)
+
+                with mock.patch.object(
+                    READER.os, "fstat", side_effect=mutate_at_boundary
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "changed during bounded read"
+                    ):
+                        READER.read_bounded(str(source), 16)
+                with self.assertRaises(OSError):
+                    original_fstat(calls[0])
+
     def test_capacity_failure_precedes_fetch_and_payload_decode(self):
         for limit in (0, -1, True, "8", 64 * 1024 * 1024 + 1, 3):
             with self.subTest(limit=limit), tempfile.TemporaryDirectory() as directory:

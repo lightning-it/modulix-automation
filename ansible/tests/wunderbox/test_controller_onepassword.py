@@ -277,18 +277,18 @@ class ControllerCredentialTests(unittest.TestCase):
             / "runbooks/00-common/tasks/resolve-hashicorp-vault-auth-onepassword.yml"
         )
         guard = yaml.safe_load(source.read_text())[0]
+        # Only the configured source is tested, never decryption. Reuse public
+        # repository text as dummy input instead of creating any password file.
+        public_fixture = source
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            password = root / "password"
-            password.write_text("synthetic-password")
-            password.chmod(0o600)
             for mode in ("none", "environment", "configuration", "identity"):
                 with self.subTest(mode=mode):
                     config = root / "profile.cfg"
                     config.write_text(
                         "[defaults]\n"
                         + (
-                            f"vault_password_file = {password}\n"
+                            f"vault_password_file = {public_fixture}\n"
                             if mode == "configuration"
                             else ""
                         )
@@ -346,9 +346,9 @@ class ControllerCredentialTests(unittest.TestCase):
                     }
                     env["ANSIBLE_CONFIG"] = str(config)
                     if mode == "environment":
-                        env["ANSIBLE_VAULT_PASSWORD_FILE"] = str(password)
+                        env["ANSIBLE_VAULT_PASSWORD_FILE"] = str(public_fixture)
                     if mode == "identity":
-                        env["ANSIBLE_VAULT_IDENTITY_LIST"] = f"fixture@{password}"
+                        env["ANSIBLE_VAULT_IDENTITY_LIST"] = f"fixture@{public_fixture}"
                     result = subprocess.run(
                         [
                             "/opt/app-root/bin/ansible-playbook",

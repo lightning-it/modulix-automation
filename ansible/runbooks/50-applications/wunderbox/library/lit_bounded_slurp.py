@@ -23,6 +23,14 @@ def read_bounded(src, max_bytes):
             data = stream.read(max_bytes + 1)
         if len(data) > max_bytes:
             raise ValueError("dump grew beyond backup limit")
+        final = os.fstat(fd)
+        if (
+            len(data) != info.st_size
+            or final.st_size != info.st_size
+            or final.st_mtime_ns != info.st_mtime_ns
+            or final.st_ctime_ns != info.st_ctime_ns
+        ):
+            raise ValueError("dump changed during bounded read")
         return data
     finally:
         os.close(fd)
