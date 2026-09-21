@@ -83,6 +83,8 @@ subprocess or inherited password handle is used. Existing destination files,
 hardlinks and symlinks are rejected before the remote read. Failures can leave
 an empty or partial ciphertext file for diagnosis, never a plaintext artifact;
 there is no automatic retry or pathname-based cleanup of that reserved output.
+There is no in-place plaintext-file encryption interface. The obsolete CLI path
+is explicitly rejected; all backup encryption uses the ciphertext-only action.
 Replacing the password pathname or its parent cannot redirect its read, and
 replacing the output parent cannot redirect the checked descriptor's write.
 The memory-profile launcher retains its pinned EE executable contract. The early metadata

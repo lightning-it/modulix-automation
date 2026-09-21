@@ -37,7 +37,7 @@ class ActionModule(ActionBase):
                 args["password_file"], (args["dest"],)
             ) as password_fd:
                 with CUSTODY.open_protected_file(
-                    args["dest"], backup=True, create=True
+                    args["dest"], create_backup=True
                 ) as output_fd:
                     reserved = True
                     fetched = self._execute_module(

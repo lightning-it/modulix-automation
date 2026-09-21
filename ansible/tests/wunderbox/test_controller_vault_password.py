@@ -5,6 +5,7 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -265,7 +266,7 @@ class PasswordCustodyTests(unittest.TestCase):
                     self.assertEqual(backup.read_bytes(), b"")
 
     def test_encryption_consumes_checked_inode_after_path_or_parent_swap(self):
-        actual_consumer = MODULE.encrypt_from_descriptor
+        actual_consumer = ACTION.CUSTODY.write_encrypted_payload
         for replace_parent in (False, True):
             with self.subTest(replace_parent=replace_parent):
                 with tempfile.TemporaryDirectory() as directory:
@@ -276,10 +277,9 @@ class PasswordCustodyTests(unittest.TestCase):
                     password.write_bytes(b"synthetic-original-password")
                     password.chmod(0o600)
                     backup = root / "backup.dump"
-                    backup.write_bytes(b"synthetic-backup-payload")
                     checked_fds = []
 
-                    def swap_then_consume(fd, destination):
+                    def swap_then_consume(fd, destination_fd, plaintext):
                         checked_fds.append(fd)
                         self.assertFalse(os.get_inheritable(fd))
                         if replace_parent:
@@ -293,14 +293,37 @@ class PasswordCustodyTests(unittest.TestCase):
                             "subprocess.Popen",
                             side_effect=AssertionError("no child allowed"),
                         ):
-                            return actual_consumer(fd, destination)
+                            return actual_consumer(fd, destination_fd, plaintext)
 
+                    action = object.__new__(ACTION.ActionModule)
+                    action._task = SimpleNamespace(
+                        args={
+                            "src": "/synthetic/remote",
+                            "dest": str(backup),
+                            "password_file": str(password),
+                            "max_bytes": 1024,
+                        }
+                    )
                     with mock.patch.object(
-                        MODULE, "encrypt_from_descriptor", side_effect=swap_then_consume
+                        ACTION.CUSTODY,
+                        "write_encrypted_payload",
+                        side_effect=swap_then_consume,
                     ):
-                        self.assertEqual(
-                            MODULE.encrypt_backup(str(password), str(backup)), 0
-                        )
+                        with mock.patch.object(
+                            ACTION.ActionBase, "run", return_value={}
+                        ):
+                            with mock.patch.object(
+                                action,
+                                "_execute_module",
+                                return_value={
+                                    "encoding": "base64",
+                                    "content": base64.b64encode(
+                                        b"synthetic-backup-payload"
+                                    ).decode(),
+                                },
+                            ):
+                                result = action.run(task_vars={})
+                        self.assertNotIn("failed", result)
                     for fd in checked_fds:
                         with self.assertRaises(OSError):
                             os.fstat(fd)
@@ -324,23 +347,111 @@ class PasswordCustodyTests(unittest.TestCase):
             password = root / "password"
             password.write_text("synthetic-password")
             password.chmod(0o644)
-            with mock.patch.object(MODULE, "encrypt_from_descriptor") as consumer:
-                with self.assertRaises(ValueError):
-                    MODULE.encrypt_backup(str(password), str(root / "backup"))
-                consumer.assert_not_called()
+            backup = root / "backup"
+            action = object.__new__(ACTION.ActionModule)
+            action._task = SimpleNamespace(
+                args={
+                    "src": "/synthetic/remote",
+                    "dest": str(backup),
+                    "password_file": str(password),
+                    "max_bytes": 1024,
+                }
+            )
+            with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
+                with mock.patch.object(action, "_execute_module") as fetch:
+                    self.assertTrue(action.run(task_vars={})["failed"])
+                fetch.assert_not_called()
+            self.assertFalse(backup.exists())
             password.chmod(0o600)
             fds = []
 
-            def fail(fd, destination):
-                fds.append(fd)
+            def fail(fd, output_fd, plaintext):
+                fds.extend((fd, output_fd))
                 raise RuntimeError("synthetic encryption failure")
 
-            with mock.patch.object(MODULE, "encrypt_from_descriptor", side_effect=fail):
-                with self.assertRaises(RuntimeError):
-                    MODULE.encrypt_backup(str(password), str(root / "backup"))
+            with mock.patch.object(
+                ACTION.CUSTODY, "write_encrypted_payload", side_effect=fail
+            ):
+                with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
+                    with mock.patch.object(
+                        action,
+                        "_execute_module",
+                        return_value={"encoding": "base64", "content": "cGF5bG9hZA=="},
+                    ):
+                        self.assertTrue(action.run(task_vars={})["failed"])
+            self.assertEqual(backup.read_bytes(), b"")
             for fd in fds:
                 with self.assertRaises(OSError):
                     os.fstat(fd)
+
+    def test_encryption_and_write_failure_never_leave_plaintext(self):
+        for failing_call in ("encrypt", "fsync"):
+            with self.subTest(
+                failing_call=failing_call
+            ), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                password = root / "password"
+                password.write_bytes(b"synthetic-password")
+                password.chmod(0o600)
+                backup = root / "backup"
+                action = object.__new__(ACTION.ActionModule)
+                action._task = SimpleNamespace(
+                    args={
+                        "src": "/synthetic/remote",
+                        "dest": str(backup),
+                        "password_file": str(password),
+                        "max_bytes": 1024,
+                    }
+                )
+                owner = (
+                    ACTION.CUSTODY.VaultLib
+                    if failing_call == "encrypt"
+                    else ACTION.CUSTODY.os
+                )
+                with mock.patch.object(
+                    owner, failing_call, side_effect=OSError("synthetic failure")
+                ):
+                    with mock.patch.object(ACTION.ActionBase, "run", return_value={}):
+                        with mock.patch.object(
+                            action,
+                            "_execute_module",
+                            return_value={
+                                "encoding": "base64",
+                                "content": base64.b64encode(
+                                    b"synthetic-plaintext-payload"
+                                ).decode(),
+                            },
+                        ):
+                            result = action.run(task_vars={})
+                self.assertTrue(result["failed"])
+                contents = backup.read_bytes()
+                self.assertNotIn(b"synthetic-plaintext-payload", contents)
+                if failing_call == "encrypt":
+                    self.assertEqual(contents, b"")
+                else:
+                    self.assertTrue(contents.startswith(b"$ANSIBLE_VAULT;"))
+
+    def test_obsolete_in_place_cli_is_rejected_without_touching_files(self):
+        self.assertFalse(hasattr(MODULE, "encrypt_backup"))
+        self.assertFalse(hasattr(MODULE, "encrypt_from_descriptor"))
+        with tempfile.TemporaryDirectory() as directory:
+            backup = Path(directory) / "old-input"
+            backup.write_bytes(b"synthetic-old-input")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    str(MODULE.__file__),
+                    "encrypt",
+                    "/absent",
+                    str(backup),
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(b"synthetic-old-input", result.stdout + result.stderr)
+            self.assertEqual(backup.read_bytes(), b"synthetic-old-input")
 
     def test_metadata_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
