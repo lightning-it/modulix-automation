@@ -16,7 +16,11 @@ def read_bounded(src, max_bytes):
     fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_size > max_bytes
+        ):
             raise ValueError("dump exceeds bounded regular-file contract")
         # Read at most limit+1; a stat-only check would race a growing file.
         with os.fdopen(os.dup(fd), "rb") as stream:
@@ -26,6 +30,7 @@ def read_bounded(src, max_bytes):
         final = os.fstat(fd)
         if (
             len(data) != info.st_size
+            or final.st_nlink != 1
             or final.st_size != info.st_size
             or final.st_mtime_ns != info.st_mtime_ns
             or final.st_ctime_ns != info.st_ctime_ns

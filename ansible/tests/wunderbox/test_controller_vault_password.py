@@ -33,9 +33,114 @@ READER_SPEC.loader.exec_module(READER)
 
 
 class PasswordCustodyTests(unittest.TestCase):
+    def test_backup_caller_clears_all_credential_facts_on_success_and_failure(self):
+        runbook = ROOT / "runbooks/50-applications/wunderbox/31-management-backup.yml"
+        lifecycle = yaml.safe_load(runbook.read_text())[0]["tasks"][0]
+        cleanup = lifecycle["always"][0]
+        names = (
+            "management_backup_db_secret",
+            "management_backup_s3_secret",
+            "vault_secret_bundle_result",
+        )
+        self.assertEqual(cleanup["ansible.builtin.set_fact"], {k: {} for k in names})
+        self.assertTrue(cleanup["no_log"])
+        plays = []
+        for failure in range(-1, len(lifecycle["block"])):
+            plays.append(
+                {
+                    "hosts": "localhost",
+                    "gather_facts": False,
+                    "tasks": [
+                        {
+                            "ansible.builtin.set_fact": {
+                                k: {"sentinel": "public-fixture"} for k in names
+                            },
+                            "no_log": True,
+                        },
+                        {
+                            "block": [
+                                {
+                                    "block": [
+                                        {
+                                            "ansible.builtin.assert": {
+                                                "that": i != failure
+                                            }
+                                        }
+                                        for i in range(len(lifecycle["block"]))
+                                    ],
+                                    "always": lifecycle["always"],
+                                }
+                            ],
+                            "rescue": [
+                                {
+                                    "ansible.builtin.debug": {
+                                        "msg": "expected injected failure"
+                                    }
+                                }
+                            ],
+                        },
+                        {
+                            "ansible.builtin.assert": {
+                                "that": [f"{k} == {{}}" for k in names]
+                            }
+                        },
+                    ],
+                }
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory) / "cleanup.yml"
+            fixture.write_text(yaml.safe_dump(plays))
+            config = Path(directory) / "ansible.cfg"
+            config.write_text("[defaults]\n")
+            result = subprocess.run(
+                [
+                    "/opt/app-root/bin/ansible-playbook",
+                    "-i",
+                    "localhost,",
+                    "-c",
+                    "local",
+                    str(fixture),
+                ],
+                env={**os.environ, "ANSIBLE_CONFIG": str(config)},
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unusable_key_material_fails_before_remote_read_or_output_reservation(self):
+        for payload in (b"", b" \n\t", b"x" * 1048577):
+            with self.subTest(
+                length=len(payload)
+            ), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                key_path = root / "custody"
+                key_path.write_bytes(payload)
+                key_path.chmod(0o600)
+                destination = root / "output"
+                with self.assertRaises(ValueError):
+                    MODULE.validate_password_file(str(key_path))
+                action = object.__new__(ACTION.ActionModule)
+                action._task = SimpleNamespace(
+                    args={
+                        "src": "/synthetic/remote",
+                        "dest": str(destination),
+                        "password_file": str(key_path),
+                        "max_bytes": 1024,
+                    }
+                )
+                with mock.patch.object(
+                    ACTION.ActionBase, "run", return_value={}
+                ), mock.patch.object(action, "_execute_module") as fetch:
+                    result = action.run(task_vars={})
+                self.assertTrue(result["failed"])
+                self.assertFalse(result["changed"])
+                fetch.assert_not_called()
+                self.assertFalse(destination.exists())
+
     def test_backup_runbook_invokes_memory_encryptor_in_real_ansible(self):
         runbook = ROOT / "runbooks/50-applications/wunderbox/31-management-backup.yml"
-        tasks = yaml.safe_load(runbook.read_text())[0]["tasks"]
+        tasks = yaml.safe_load(runbook.read_text())[0]["tasks"][0]["block"]
         task = next(
             t for t in tasks if "_management_backup_encrypt_result" == t.get("register")
         )
@@ -218,7 +323,9 @@ class PasswordCustodyTests(unittest.TestCase):
             with mock.patch.object(
                 READER.os,
                 "fstat",
-                return_value=SimpleNamespace(st_mode=info.st_mode, st_size=0),
+                return_value=SimpleNamespace(
+                    st_mode=info.st_mode, st_size=0, st_nlink=1
+                ),
             ):
                 with self.assertRaises(ValueError):
                     READER.read_bounded(str(source), 7)
@@ -231,9 +338,19 @@ class PasswordCustodyTests(unittest.TestCase):
                     (ValueError, OSError)
                 ):
                     READER.read_bounded(str(invalid), 8)
+            hardlink = source.parent / "hardlink"
+            os.link(source, hardlink)
+            with self.assertRaises(ValueError):
+                READER.read_bounded(str(hardlink), 8)
 
     def test_bounded_reader_rejects_changes_during_or_after_read(self):
-        for mode in ("grow-during", "grow-after", "shrink-after", "rewrite-after"):
+        for mode in (
+            "grow-during",
+            "grow-after",
+            "shrink-after",
+            "rewrite-after",
+            "link-after",
+        ):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 source = Path(directory) / "dump"
                 source.write_bytes(b"01234567")
@@ -244,7 +361,9 @@ class PasswordCustodyTests(unittest.TestCase):
                     calls.append(fd)
                     before = original_fstat(fd)
                     boundary = 1 if mode == "grow-during" else 2
-                    if len(calls) == boundary:
+                    if len(calls) == boundary and mode == "link-after":
+                        os.link(source, source.parent / "new-link")
+                    elif len(calls) == boundary:
                         replacement = {
                             "grow-during": b"012345678",
                             "grow-after": b"012345678",
@@ -316,10 +435,14 @@ class PasswordCustodyTests(unittest.TestCase):
                     password.chmod(0o600)
                     backup = root / "backup.dump"
                     checked_fds = []
+                    actual_reader = ACTION.CUSTODY.read_password
 
-                    def swap_then_consume(fd, destination_fd, plaintext):
+                    def record_read(fd):
                         checked_fds.append(fd)
                         self.assertFalse(os.get_inheritable(fd))
+                        return actual_reader(fd)
+
+                    def swap_then_consume(key, destination_fd, plaintext):
                         if replace_parent:
                             custody.rename(root / "retired")
                             custody.mkdir(mode=0o700)
@@ -331,7 +454,7 @@ class PasswordCustodyTests(unittest.TestCase):
                             "subprocess.Popen",
                             side_effect=AssertionError("no child allowed"),
                         ):
-                            return actual_consumer(fd, destination_fd, plaintext)
+                            return actual_consumer(key, destination_fd, plaintext)
 
                     action = object.__new__(ACTION.ActionModule)
                     action._task = SimpleNamespace(
@@ -343,6 +466,8 @@ class PasswordCustodyTests(unittest.TestCase):
                         }
                     )
                     with mock.patch.object(
+                        ACTION.CUSTODY, "read_password", side_effect=record_read
+                    ), mock.patch.object(
                         ACTION.CUSTODY,
                         "write_encrypted_payload",
                         side_effect=swap_then_consume,
@@ -403,8 +528,8 @@ class PasswordCustodyTests(unittest.TestCase):
             password.chmod(0o600)
             fds = []
 
-            def fail(fd, output_fd, plaintext):
-                fds.extend((fd, output_fd))
+            def fail(key, output_fd, plaintext):
+                fds.append(output_fd)
                 raise RuntimeError("synthetic encryption failure")
 
             with mock.patch.object(

@@ -80,17 +80,23 @@ def open_protected_file(path, forbidden_paths=(), *, create_backup=False):
 
 
 def validate_password_file(path, forbidden_paths=()):
-    # Early metadata preflight only, not a capability for a subsequent open.
-    with open_protected_file(path, forbidden_paths):
+    # Early material preflight, not a capability for a subsequent open.
+    with open_protected_file(path, forbidden_paths) as fd:
+        read_password(fd)
         return path
 
 
-def write_encrypted_payload(password_fd, output_fd, plaintext):
-    """Only ciphertext crosses the already validated output descriptor."""
-    password = os.pread(password_fd, 1048577, 0).strip()
-    if not password or len(password) > 1048576:
+def read_password(password_fd):
+    """Validate and pin key material before fetching any backup payload."""
+    raw = os.pread(password_fd, 1048577, 0)
+    if len(raw) > 1048576 or not raw.strip():
         raise ValueError("non-empty bounded password required")
-    data = VaultLib().encrypt(plaintext, VaultSecret(password))
+    return VaultSecret(raw.strip())
+
+
+def write_encrypted_payload(password, output_fd, plaintext):
+    """Only ciphertext crosses the already validated output descriptor."""
+    data = VaultLib().encrypt(plaintext, password)
     with os.fdopen(os.dup(output_fd), "wb") as output:
         output.write(data)
         output.flush()

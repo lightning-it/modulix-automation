@@ -126,7 +126,8 @@ class ControllerCredentialTests(unittest.TestCase):
     def test_backup_vault_lifecycle_cleanup_on_success_and_each_failure(self):
         runbook = ROOT / "runbooks/50-applications/wunderbox/31-management-backup.yml"
         play = yaml.safe_load(runbook.read_text())[0]
-        lifecycle = play["tasks"][0]
+        backup_body = play["tasks"][0]["block"]
+        lifecycle = backup_body[0]
         self.assertEqual(len(lifecycle["block"]), 5)
         resolver = lifecycle["block"][0]["ansible.builtin.include_tasks"]
         self.assertTrue((runbook.parent / resolver).resolve().is_file())
@@ -135,7 +136,7 @@ class ControllerCredentialTests(unittest.TestCase):
         )
         self.assertIn("end_play", str(play["pre_tasks"][-2]))
         self.assertFalse(any("resolve-hashicorp" in str(t) for t in play["pre_tasks"]))
-        self.assertNotIn("vault_secret_bundle", str(play["tasks"][1:]))
+        self.assertNotIn("vault_secret_bundle", str(backup_body[1:]))
         close = lifecycle["always"][-1]["ansible.builtin.include_tasks"]
         close_path = (runbook.parent / close).resolve()
         self.assertTrue(close_path.is_file())

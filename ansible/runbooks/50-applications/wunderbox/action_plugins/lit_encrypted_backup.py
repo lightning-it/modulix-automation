@@ -31,30 +31,31 @@ class ActionModule(ActionBase):
             limit = args["max_bytes"]
             if type(limit) is not int or not 0 < limit <= 64 * 1024 * 1024:
                 raise ValueError("explicit memory capacity limit required")
-            # Validate and reserve both descriptors BEFORE any remote read.
+            # Pin valid key material and close its FD BEFORE any remote read.
             # O_EXCL rejects existing files/symlinks, including hardlinks.
             with CUSTODY.open_protected_file(
                 args["password_file"], (args["dest"],)
             ) as password_fd:
-                with CUSTODY.open_protected_file(
-                    args["dest"], create_backup=True
-                ) as output_fd:
-                    reserved = True
-                    fetched = self._execute_module(
-                        module_name="lit_bounded_slurp",
-                        module_args={"src": args["src"], "max_bytes": limit},
-                        task_vars=task_vars,
-                        tmp=tmp,
-                    )
-                    if fetched.get("failed") or fetched.get("encoding") != "base64":
-                        raise ValueError("backup read failed")
-                    if len(fetched["content"]) > 4 * ((limit + 2) // 3):
-                        raise ValueError("encoded backup exceeds capacity contract")
-                    plaintext = base64.b64decode(fetched["content"], validate=True)
-                    if len(plaintext) > limit:
-                        raise ValueError("backup exceeds capacity contract")
-                    del fetched
-                    CUSTODY.write_encrypted_payload(password_fd, output_fd, plaintext)
+                password = CUSTODY.read_password(password_fd)
+            with CUSTODY.open_protected_file(
+                args["dest"], create_backup=True
+            ) as output_fd:
+                reserved = True
+                fetched = self._execute_module(
+                    module_name="lit_bounded_slurp",
+                    module_args={"src": args["src"], "max_bytes": limit},
+                    task_vars=task_vars,
+                    tmp=tmp,
+                )
+                if fetched.get("failed") or fetched.get("encoding") != "base64":
+                    raise ValueError("backup read failed")
+                if len(fetched["content"]) > 4 * ((limit + 2) // 3):
+                    raise ValueError("encoded backup exceeds capacity contract")
+                plaintext = base64.b64decode(fetched["content"], validate=True)
+                if len(plaintext) > limit:
+                    raise ValueError("backup exceeds capacity contract")
+                del fetched
+                CUSTODY.write_encrypted_payload(password, output_fd, plaintext)
             return {"changed": True, "_ansible_no_log": True}
         except Exception:
             # Never return the module response, arguments, plaintext or secrets.

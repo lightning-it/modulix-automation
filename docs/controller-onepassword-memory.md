@@ -68,14 +68,18 @@ still requires its existing Ansible Vault password-file contract. A shared
 validator used by both legacy authentication and backup checks canonical,
 symlink-free protected parent directories, a distinct readable regular file,
 root/controller ownership, single link, 0400/0600 mode, and 1-byte-to-1-MiB size.
-Backup validates before secret reads/dumps. Its playbook-adjacent controller
-action validates and holds the password descriptor and exclusively reserves a
+It also rejects empty/whitespace-only key material before any secret read/dump.
+The controller action reads and pins that key through the checked descriptor,
+closes it before invoking the remote module, and exclusively reserves a
 new 0600 output in a no-follow private directory before reading the remote dump.
+The outer backup lifecycle clears database, Object Storage and secret-bundle
+response facts in an always block, including failures after transport closure.
 The remote bounded reader accepts an explicit inventory
 `wunderbox_management_backup.max_dump_bytes` limit between 1 and 67108864 bytes
 (64 MiB); no implicit capacity default is used. Its descriptor-based read stops
 at limit+1 even if the file grows after stat, rejecting oversized dumps before
-returning their payload. A final stat of the held descriptor must match the
+returning their payload. Multiple hardlinks are rejected before and after read.
+A final stat of the held descriptor must match the
 initial size, modification time and change time, and the read length must match
 that size. Changes fail closed; the producer must supply a completed, immutable
 dump (this check is not a filesystem snapshot). Encoded and decoded lengths are
@@ -94,10 +98,10 @@ There is no in-place plaintext-file encryption interface. The obsolete CLI path
 is explicitly rejected; all backup encryption uses the ciphertext-only action.
 Replacing the password pathname or its parent cannot redirect its read, and
 replacing the output parent cannot redirect the checked descriptor's write.
-The memory-profile launcher retains its pinned EE executable contract. The early metadata
+The memory-profile launcher retains its pinned EE executable contract. The early custody
 lookup is only a preflight, not a promise about a later pathname open. The
 legacy backend still uses Ansible's initially loaded Vault secret; its added
-metadata preflight does not replace that existing decryption mechanism.
+custody preflight does not replace that existing decryption mechanism.
 The metadata validator never reads the password value. The encryptor reads it
 only in process memory, never into logs or a new credential file. This memory-only
 launcher deliberately does not supply that separate backup encryption key.
