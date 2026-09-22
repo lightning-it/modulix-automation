@@ -329,6 +329,7 @@
         - name: Forget resolved controller Vault authentication
           ansible.builtin.set_fact:
             _hetzner_hashicorp_vault_auth: {}
+            _hetzner_vault_memory_auth: {}
           no_log: true
           tags: [always]
 

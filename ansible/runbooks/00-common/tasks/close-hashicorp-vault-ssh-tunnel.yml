@@ -112,6 +112,14 @@
           | default(false)
 
   always:
+    - name: Forget all controller authentication facts before transport cleanup
+      ansible.builtin.set_fact:
+        _hetzner_hashicorp_vault_auth: {}
+        _hetzner_vault_memory_auth: {}
+        _hetzner_vault_auth_document: {}
+      changed_when: false
+      no_log: true
+
     - name: Remove the retired controller Vault SSH control socket
       ansible.builtin.file:
         path: "{{ _hetzner_vault_tunnel_control_path }}"

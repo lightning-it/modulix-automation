@@ -82,6 +82,9 @@
           - _management_backup_contract.get('database', '') | trim | length > 0
           - _management_backup_contract.get('database_user', '') | trim | length > 0
           - _management_backup_contract.get('container', '') | trim | length > 0
+          - _management_backup_config.get('max_dump_bytes', 0) is integer
+          - _management_backup_config.get('max_dump_bytes', 0) > 0
+          - _management_backup_config.get('max_dump_bytes', 0) <= 67108864
           - _management_backup_config.get('versioning_required', false) is sameas true
           - _management_backup_config.get('object_lock_mode', '') == 'COMPLIANCE'
           - >-
@@ -106,228 +109,236 @@
           Use the exact host, select keycloak, netbox, or guacamole, and set
           wunderbox_management_backup_action=backup only for a protected S3
           target with client-side encryption custody, versioning, Object Lock,
-          and Vault-backed Object Storage credentials.
+          Vault-backed Object Storage credentials, and an explicit max_dump_bytes
+          capacity between 1 and 67108864 bytes.
         quiet: true
 
     - name: End after the read-only backup plan
       ansible.builtin.meta: end_play
       when: wunderbox_management_backup_action | default('plan') == 'plan'
 
-    - name: Resolve scoped controller HashiCorp Vault authentication
+    - name: Require separate backup encryption custody before reading secrets
       ansible.builtin.include_tasks: >-
-        ../../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+        ../../00-common/tasks/validate-controller-vault-password-file.yml
       no_log: true
 
   tasks:
-    - name: Read the service database credential from Vault
-      ansible.builtin.include_role:
-        name: lit.supplementary.vault_secret_bundle
-      vars:
-        vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
-        vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
-        vault_secret_bundle_kv_path: >-
-          {{ wunderbox_management_vault_paths[_management_backup_selected] }}
-        vault_secret_bundle_validate_certs: true
-        vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
-        vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
-        vault_secret_bundle_auth_mount_point: >-
-          {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
-        vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
-        vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
-        vault_secret_bundle_generate_missing: false
-        vault_secret_bundle_items: [{name: db_password}]
-      no_log: true
+    - name: Run encrypted backup with caller-owned credential cleanup
+      block:
+        - name: Read backup credentials through a caller-owned Vault transport
+          block:
+            - name: Resolve scoped controller HashiCorp Vault authentication
+              ansible.builtin.include_tasks: >-
+                ../../00-common/tasks/resolve-hashicorp-vault-auth.yml
+              no_log: true
 
-    - name: Capture the service database credential
-      ansible.builtin.set_fact:
-        management_backup_db_secret: "{{ vault_secret_bundle_result }}"
-      no_log: true
+            - name: Read the service database credential from Vault
+              ansible.builtin.include_role:
+                name: lit.supplementary.vault_secret_bundle
+              vars:
+                vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
+                vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
+                vault_secret_bundle_kv_path: >-
+                  {{ wunderbox_management_vault_paths[_management_backup_selected] }}
+                vault_secret_bundle_validate_certs: true
+                vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+                vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
+                vault_secret_bundle_auth_mount_point: >-
+                  {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+                vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+                vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+                vault_secret_bundle_generate_missing: false
+                vault_secret_bundle_items: [{name: db_password}]
+              no_log: true
 
-    - name: Read Object Storage credentials from Vault
-      ansible.builtin.include_role:
-        name: lit.supplementary.vault_secret_bundle
-      vars:
-        vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
-        vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
-        vault_secret_bundle_kv_path: >-
-          {{ wunderbox_management_vault_paths.object_storage }}
-        vault_secret_bundle_validate_certs: true
-        vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
-        vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
-        vault_secret_bundle_auth_mount_point: >-
-          {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
-        vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
-        vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
-        vault_secret_bundle_generate_missing: false
-        vault_secret_bundle_items:
-          - {name: access_key}
-          - {name: secret_key}
-      no_log: true
+            - name: Capture the service database credential
+              ansible.builtin.set_fact:
+                management_backup_db_secret: "{{ vault_secret_bundle_result }}"
+              no_log: true
 
-    - name: Capture the Object Storage credentials
-      ansible.builtin.set_fact:
-        management_backup_s3_secret: "{{ vault_secret_bundle_result }}"
-      no_log: true
+            - name: Read Object Storage credentials from Vault
+              ansible.builtin.include_role:
+                name: lit.supplementary.vault_secret_bundle
+              vars:
+                vault_secret_bundle_address: "{{ _hetzner_hashicorp_vault_auth.url }}"
+                vault_secret_bundle_kv_mount: "{{ wunderbox_management_vault_kv_mount }}"
+                vault_secret_bundle_kv_path: >-
+                  {{ wunderbox_management_vault_paths.object_storage }}
+                vault_secret_bundle_validate_certs: true
+                vault_secret_bundle_ca_cert: "{{ _hetzner_hashicorp_vault_auth.ca_cert }}"
+                vault_secret_bundle_namespace: "{{ _hetzner_hashicorp_vault_auth.namespace }}"
+                vault_secret_bundle_auth_mount_point: >-
+                  {{ _hetzner_hashicorp_vault_auth.auth_mount_point }}
+                vault_secret_bundle_role_id: "{{ _hetzner_hashicorp_vault_auth.role_id }}"
+                vault_secret_bundle_secret_id: "{{ _hetzner_hashicorp_vault_auth.secret_id }}"
+                vault_secret_bundle_generate_missing: false
+                vault_secret_bundle_items:
+                  - {name: access_key}
+                  - {name: secret_key}
+              no_log: true
 
-    - name: Arm cleanup for the transient host database dump
-      ansible.builtin.debug:
-        msg: "Transient host database dump cleanup is armed."
-      changed_when: true
-      notify: Remove transient host database dump
+            - name: Capture the Object Storage credentials
+              ansible.builtin.set_fact:
+                management_backup_s3_secret: "{{ vault_secret_bundle_result }}"
+              no_log: true
 
-    - name: Create the database dump through the collection backup role
-      ansible.builtin.include_role:
-        name: lit.supplementary.postgres_backup_restore
-      vars:
-        postgres_backup_restore_action: backup
-        postgres_backup_restore_execute: true
-        postgres_backup_restore_backup_dir: >-
-          {{ _management_backup_contract.get('backup_dir', '') }}
-        postgres_backup_restore_file: "{{ _management_backup_file }}"
-        postgres_backup_restore_db_name: >-
-          {{ _management_backup_contract.get('database', '') }}
-        postgres_backup_restore_db_user: >-
-          {{ _management_backup_contract.get('database_user', '') }}
-        postgres_backup_restore_db_password: >-
-          {{ management_backup_db_secret.db_password }}
-        postgres_backup_restore_db_host: 127.0.0.1
-        postgres_backup_restore_db_port: 5432
-        postgres_backup_restore_execution_mode: podman
-        postgres_backup_restore_container_name: >-
-          {{ _management_backup_contract.get('container', '') }}
-        postgres_backup_restore_retention_keep_last: 0
-      no_log: true
+          always:
+            - name: Forget resolved controller Vault authentication
+              ansible.builtin.set_fact:
+                _hetzner_hashicorp_vault_auth: {}
+                _hetzner_vault_memory_auth: {}
+              no_log: true
 
-    - name: Create the protected controller backup directory
-      delegate_to: localhost
-      become: false
-      ansible.builtin.file:
-        path: "{{ _management_backup_controller_dir }}"
-        state: directory
-        mode: '0700'
+            - name: Close the inventory-declared controller Vault transport
+              ansible.builtin.include_tasks: >-
+                ../../00-common/tasks/close-hashicorp-vault-ssh-tunnel.yml
 
-    - name: Arm cleanup for incomplete controller backup plaintext
-      ansible.builtin.debug:
-        msg: "Incomplete controller backup artifact cleanup is armed."
-      changed_when: true
-      notify: Remove incomplete controller backup artifact
+        - name: Arm cleanup for the transient host database dump
+          ansible.builtin.debug:
+            msg: "Transient host database dump cleanup is armed."
+          changed_when: true
+          notify: Remove transient host database dump
 
-    - name: Fetch the transient database dump to the controller
-      ansible.builtin.fetch:
-        src: "{{ _management_backup_file }}"
-        dest: "{{ _management_backup_ciphertext }}"
-        flat: true
-      no_log: true
+        - name: Create the database dump through the collection backup role
+          ansible.builtin.include_role:
+            name: lit.supplementary.postgres_backup_restore
+          vars:
+            postgres_backup_restore_action: backup
+            postgres_backup_restore_execute: true
+            postgres_backup_restore_backup_dir: >-
+              {{ _management_backup_contract.get('backup_dir', '') }}
+            postgres_backup_restore_file: "{{ _management_backup_file }}"
+            postgres_backup_restore_db_name: >-
+              {{ _management_backup_contract.get('database', '') }}
+            postgres_backup_restore_db_user: >-
+              {{ _management_backup_contract.get('database_user', '') }}
+            postgres_backup_restore_db_password: >-
+              {{ management_backup_db_secret.db_password }}
+            postgres_backup_restore_db_host: 127.0.0.1
+            postgres_backup_restore_db_port: 5432
+            postgres_backup_restore_execution_mode: podman
+            postgres_backup_restore_container_name: >-
+              {{ _management_backup_contract.get('container', '') }}
+            postgres_backup_restore_retention_keep_last: 0
+          no_log: true
 
-    - name: Encrypt the fetched dump with the controller Ansible Vault custody
-      delegate_to: localhost
-      become: false
-      ansible.builtin.command:
-        argv:
-          - ansible-vault
-          - encrypt
-          - --vault-password-file
-          - "{{ lookup('ansible.builtin.env', 'ANSIBLE_VAULT_PASSWORD_FILE') }}"
-          - "{{ _management_backup_ciphertext }}"
-      register: _management_backup_encrypt_result
-      changed_when: true
-      no_log: true
+        - name: Revalidate encryption custody immediately before use
+          ansible.builtin.include_tasks: >-
+            ../../00-common/tasks/validate-controller-vault-password-file.yml
+          no_log: true
 
-    - name: Inspect the encrypted backup ciphertext
-      delegate_to: localhost
-      become: false
-      ansible.builtin.stat:
-        path: "{{ _management_backup_ciphertext }}"
-        checksum_algorithm: sha256
-        get_checksum: true
-        follow: false
-      register: _management_backup_ciphertext_stat
+        - name: Fetch into memory and persist only controller-encrypted ciphertext
+          lit_encrypted_backup:
+            src: "{{ _management_backup_file }}"
+            dest: "{{ _management_backup_ciphertext }}"
+            password_file: "{{ _hetzner_vault_validated_password_file }}"
+            max_bytes: "{{ _management_backup_config.max_dump_bytes }}"
+          register: _management_backup_encrypt_result
+          changed_when: true
+          no_log: true
 
-    - name: Upload the encrypted backup to protected Object Storage
-      delegate_to: localhost
-      become: false
-      amazon.aws.s3_object:
-        mode: put
-        endpoint_url: "{{ _management_backup_config.get('endpoint', '') }}"
-        region: "{{ _management_backup_config.get('region', '') }}"
-        bucket: "{{ _management_backup_config.get('bucket', '') }}"
-        object: "{{ _management_backup_object }}"
-        src: "{{ _management_backup_ciphertext }}"
-        access_key: "{{ management_backup_s3_secret.access_key }}"
-        secret_key: "{{ management_backup_s3_secret.secret_key }}"
-        encrypt: true
-        overwrite: different
-        validate_certs: true
-      no_log: true
+        - name: Inspect the encrypted backup ciphertext
+          delegate_to: localhost
+          become: false
+          ansible.builtin.stat:
+            path: "{{ _management_backup_ciphertext }}"
+            checksum_algorithm: sha256
+            get_checksum: true
+            follow: false
+          register: _management_backup_ciphertext_stat
 
-    - name: Arm cleanup for the temporary S3 readback artifact
-      ansible.builtin.debug:
-        msg: "Temporary S3 readback cleanup is armed."
-      changed_when: true
-      notify: Remove temporary S3 readback artifact
+        - name: Upload the encrypted backup to protected Object Storage
+          delegate_to: localhost
+          become: false
+          amazon.aws.s3_object:
+            mode: put
+            endpoint_url: "{{ _management_backup_config.get('endpoint', '') }}"
+            region: "{{ _management_backup_config.get('region', '') }}"
+            bucket: "{{ _management_backup_config.get('bucket', '') }}"
+            object: "{{ _management_backup_object }}"
+            src: "{{ _management_backup_ciphertext }}"
+            access_key: "{{ management_backup_s3_secret.access_key }}"
+            secret_key: "{{ management_backup_s3_secret.secret_key }}"
+            encrypt: true
+            overwrite: different
+            validate_certs: true
+          no_log: true
 
-    - name: Read the uploaded ciphertext back from Object Storage
-      delegate_to: localhost
-      become: false
-      amazon.aws.s3_object:
-        mode: get
-        endpoint_url: "{{ _management_backup_config.get('endpoint', '') }}"
-        region: "{{ _management_backup_config.get('region', '') }}"
-        bucket: "{{ _management_backup_config.get('bucket', '') }}"
-        object: "{{ _management_backup_object }}"
-        dest: "{{ _management_backup_readback }}"
-        access_key: "{{ management_backup_s3_secret.access_key }}"
-        secret_key: "{{ management_backup_s3_secret.secret_key }}"
-        overwrite: always
-        validate_certs: true
-      no_log: true
+        - name: Arm cleanup for the temporary S3 readback artifact
+          ansible.builtin.debug:
+            msg: "Temporary S3 readback cleanup is armed."
+          changed_when: true
+          notify: Remove temporary S3 readback artifact
 
-    - name: Inspect the S3 ciphertext readback
-      delegate_to: localhost
-      become: false
-      ansible.builtin.stat:
-        path: "{{ _management_backup_readback }}"
-        checksum_algorithm: sha256
-        get_checksum: true
-        follow: false
-      register: _management_backup_readback_stat
+        - name: Read the uploaded ciphertext back from Object Storage
+          delegate_to: localhost
+          become: false
+          amazon.aws.s3_object:
+            mode: get
+            endpoint_url: "{{ _management_backup_config.get('endpoint', '') }}"
+            region: "{{ _management_backup_config.get('region', '') }}"
+            bucket: "{{ _management_backup_config.get('bucket', '') }}"
+            object: "{{ _management_backup_object }}"
+            dest: "{{ _management_backup_readback }}"
+            access_key: "{{ management_backup_s3_secret.access_key }}"
+            secret_key: "{{ management_backup_s3_secret.secret_key }}"
+            overwrite: always
+            validate_certs: true
+          no_log: true
 
-    - name: Require byte-identical S3 ciphertext readback
-      ansible.builtin.assert:
-        that:
-          - >-
-            _management_backup_readback_stat.stat.checksum
-            == _management_backup_ciphertext_stat.stat.checksum
-        fail_msg: "The S3 backup readback differs from the encrypted source artifact."
-        quiet: true
+        - name: Inspect the S3 ciphertext readback
+          delegate_to: localhost
+          become: false
+          ansible.builtin.stat:
+            path: "{{ _management_backup_readback }}"
+            checksum_algorithm: sha256
+            get_checksum: true
+            follow: false
+          register: _management_backup_readback_stat
 
-    - name: Remove the temporary S3 readback
-      delegate_to: localhost
-      become: false
-      ansible.builtin.file:
-        path: "{{ _management_backup_readback }}"
-        state: absent
+        - name: Require byte-identical S3 ciphertext readback
+          ansible.builtin.assert:
+            that:
+              - >-
+                _management_backup_readback_stat.stat.checksum
+                == _management_backup_ciphertext_stat.stat.checksum
+            fail_msg: "The S3 backup readback differs from the encrypted source artifact."
+            quiet: true
 
-    - name: Remove the transient plaintext database dump
-      ansible.builtin.file:
-        path: "{{ _management_backup_file }}"
-        state: absent
+        - name: Remove the temporary S3 readback
+          delegate_to: localhost
+          become: false
+          ansible.builtin.file:
+            path: "{{ _management_backup_readback }}"
+            state: absent
 
-    - name: Publish sanitized encrypted backup evidence
-      ansible.builtin.set_fact:
-        wunderbox_management_backup_result:
-          schema_version: 1
-          host: "{{ inventory_hostname }}"
-          service: "{{ _management_backup_selected }}"
-          ciphertext_path: "{{ _management_backup_ciphertext }}"
-          ciphertext_sha256: >-
-            {{ _management_backup_ciphertext_stat.stat.checksum }}
-          bucket: "{{ _management_backup_config.get('bucket', '') }}"
-          object: "{{ _management_backup_object }}"
-          s3_readback_verified: true
-          encrypted: ansible-vault
-          created_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
-      changed_when: false
+        - name: Remove the transient plaintext database dump
+          ansible.builtin.file:
+            path: "{{ _management_backup_file }}"
+            state: absent
+
+        - name: Publish sanitized encrypted backup evidence
+          ansible.builtin.set_fact:
+            wunderbox_management_backup_result:
+              schema_version: 1
+              host: "{{ inventory_hostname }}"
+              service: "{{ _management_backup_selected }}"
+              ciphertext_path: "{{ _management_backup_ciphertext }}"
+              ciphertext_sha256: >-
+                {{ _management_backup_ciphertext_stat.stat.checksum }}
+              bucket: "{{ _management_backup_config.get('bucket', '') }}"
+              object: "{{ _management_backup_object }}"
+              s3_readback_verified: true
+              encrypted: ansible-vault
+              created_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+          changed_when: false
+      always:
+        - name: Forget backup database and Object Storage credentials
+          ansible.builtin.set_fact:
+            management_backup_db_secret: {}
+            management_backup_s3_secret: {}
+            vault_secret_bundle_result: {}
+          no_log: true
 
   handlers:
     - name: Remove transient host database dump
@@ -341,13 +352,3 @@
       ansible.builtin.file:
         path: "{{ _management_backup_readback }}"
         state: absent
-
-    - name: Remove incomplete controller backup artifact
-      delegate_to: localhost
-      become: false
-      ansible.builtin.file:
-        path: "{{ _management_backup_ciphertext }}"
-        state: absent
-      when: >-
-        _management_backup_encrypt_result is not defined or
-        _management_backup_encrypt_result is failed
