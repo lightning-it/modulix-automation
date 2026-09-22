@@ -3,6 +3,8 @@
 The default backend remains `ansible_vault`. Its existing encrypted-document
 checks are retained, with an added password-custody preflight before opening
 the tunnel and shared cleanup of backend-specific credential facts afterward.
+The normal and AAP-local execution profiles both discover the project lookup
+plugins without relying on an ambient lookup-plugin environment override.
 These are intentional lifecycle changes, not byte-for-byte preservation.
 `hashicorp_vault_controller_auth.backend: onepassword_memory`
 is an explicit alternative for a trusted desktop-to-Linux-EE transport. There is
@@ -83,6 +85,8 @@ The remote bounded reader accepts an explicit inventory
 (64 MiB); no implicit capacity default is used. Its descriptor-based read stops
 at limit+1 even if the file grows after stat, rejecting oversized dumps before
 returning their payload. Multiple hardlinks are rejected before and after read.
+Remote dump parent directories are traversed through held no-follow descriptors;
+symlinked ancestors and noncanonical paths are rejected before reading the file.
 A final stat of the held descriptor must match the
 initial size, modification time and change time, and the read length must match
 that size. Changes fail closed; the producer must supply a completed, immutable

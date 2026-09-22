@@ -13,7 +13,27 @@ MAX_BYTES = 64 * 1024 * 1024
 def read_bounded(src, max_bytes):
     if type(max_bytes) is not int or not 0 < max_bytes <= MAX_BYTES:
         raise ValueError("explicit backup limit must be within 1..64 MiB")
-    fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    if (
+        not isinstance(src, str)
+        or not src.startswith("/")
+        or any(part in ("", ".", "..") for part in src.split("/")[1:])
+    ):
+        raise ValueError("absolute canonical dump path required")
+    parent = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in src.split("/")[1:-1]:
+            child = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
+            )
+            os.close(parent)
+            parent = child
+        fd = os.open(
+            src.rsplit("/", 1)[1],
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=parent,
+        )
+    finally:
+        os.close(parent)
     try:
         info = os.fstat(fd)
         if (

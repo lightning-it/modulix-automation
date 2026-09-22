@@ -33,6 +33,87 @@ READER_SPEC.loader.exec_module(READER)
 
 
 class PasswordCustodyTests(unittest.TestCase):
+    def test_aap_profile_discovers_password_lookup_without_environment_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            password = root / "password"
+            password.write_bytes(b"synthetic-password")
+            password.chmod(0o600)
+            play = root / "fixture.yml"
+            play.write_text(
+                yaml.safe_dump(
+                    [
+                        {
+                            "hosts": "localhost",
+                            "gather_facts": False,
+                            "tasks": [
+                                {
+                                    "ansible.builtin.assert": {
+                                        "that": "query('lit_controller_vault_password', '"
+                                        + str(password)
+                                        + "') | first == '"
+                                        + str(password)
+                                        + "'"
+                                    }
+                                }
+                            ],
+                        }
+                    ]
+                )
+            )
+            env = dict(os.environ, ANSIBLE_CONFIG=str(ROOT / "aap-local.cfg"))
+            env.pop("ANSIBLE_LOOKUP_PLUGINS", None)
+            result = subprocess.run(
+                ["ansible-playbook", "-i", "localhost,", "-c", "local", str(play)],
+                env=env,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_remote_reader_rejects_symlinked_ancestors_and_noncanonical_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / "backup"
+            parent.mkdir()
+            source = parent / "dump"
+            source.write_bytes(b"original")
+            alias = root / "alias"
+            alias.symlink_to(parent, target_is_directory=True)
+            for path in (
+                str(alias / "dump"),
+                str(root / "missing" / "dump"),
+                str(root) + "/backup/../backup/dump",
+                str(root) + "//backup/dump",
+                "backup/dump",
+            ):
+                with self.subTest(path=path), self.assertRaises((OSError, ValueError)):
+                    READER.read_bounded(path, 8)
+
+    def test_remote_reader_pins_parent_before_pathname_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / "backup"
+            parent.mkdir()
+            source = parent / "dump"
+            source.write_bytes(b"original")
+            victim = root / "victim"
+            victim.mkdir()
+            (victim / "dump").write_bytes(b"redirect")
+            original_open = os.open
+
+            def replace_parent(path, flags, *args, **kwargs):
+                if path == "dump" and kwargs.get("dir_fd") is not None:
+                    parent.rename(root / "held")
+                    parent.symlink_to(victim, target_is_directory=True)
+                return original_open(path, flags, *args, **kwargs)
+
+            with mock.patch.object(READER.os, "open", side_effect=replace_parent):
+                self.assertEqual(READER.read_bounded(str(source), 8), b"original")
+            self.assertEqual((victim / "dump").read_bytes(), b"redirect")
+
     def test_backup_caller_clears_all_credential_facts_on_success_and_failure(self):
         runbook = ROOT / "runbooks/50-applications/wunderbox/31-management-backup.yml"
         lifecycle = yaml.safe_load(runbook.read_text())[0]["tasks"][0]
