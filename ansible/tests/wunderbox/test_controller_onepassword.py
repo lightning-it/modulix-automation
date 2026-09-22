@@ -283,7 +283,13 @@ class ControllerCredentialTests(unittest.TestCase):
         public_fixture = source
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for mode in ("none", "environment", "configuration", "identity"):
+            for mode in (
+                "none",
+                "environment",
+                "configuration",
+                "identity",
+                "identity_configuration",
+            ):
                 with self.subTest(mode=mode):
                     config = root / "profile.cfg"
                     config.write_text(
@@ -291,6 +297,11 @@ class ControllerCredentialTests(unittest.TestCase):
                         + (
                             f"vault_password_file = {public_fixture}\n"
                             if mode == "configuration"
+                            else ""
+                        )
+                        + (
+                            f"vault_identity_list = fixture@{public_fixture}\n"
+                            if mode == "identity_configuration"
                             else ""
                         )
                     )
@@ -439,6 +450,19 @@ class ControllerCredentialTests(unittest.TestCase):
             "_management_tls_issuer_resolved_auth",
             "_management_tls_custody_resolved_auth",
             "_management_tls_logins",
+            "_management_tls_capabilities",
+            "_management_tls_existing_kv",
+            "_management_tls_existing_data",
+            "_management_tls_issued",
+            "_management_tls_issued_data",
+            "_management_tls_kv_write",
+            "_management_tls_kv_readback",
+            "_management_tls_stored",
+            "_management_tls_existing_key_info",
+            "_management_tls_issued_key_info",
+            "_management_tls_stored_key_info",
+            "_management_tls_intermediate_readback",
+            "_management_tls_root_readback",
         ):
             self.assertEqual(facts[name], {})
         self.assertTrue(cleanup["no_log"])

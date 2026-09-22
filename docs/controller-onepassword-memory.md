@@ -102,9 +102,11 @@ The memory-profile launcher retains its pinned EE executable contract. The early
 lookup is only a preflight, not a promise about a later pathname open. The
 legacy backend still uses Ansible's initially loaded Vault secret; its added
 custody preflight does not replace that existing decryption mechanism.
-The metadata validator never reads the password value. The encryptor reads it
-only in process memory, never into logs or a new credential file. This memory-only
-launcher deliberately does not supply that separate backup encryption key.
+The custody preflight validates both protected file metadata and bounded,
+non-empty password material in process memory. The encryptor independently pins
+that material before any remote dump read. Neither path writes it to logs or a
+new credential file. This memory-only launcher deliberately does not supply that
+separate backup encryption key.
 
 The controller contract retains schema, subject, AppRole name and auth mount.
 Its `onepassword` mapping must contain exactly `item_id`, `vault_id`,
