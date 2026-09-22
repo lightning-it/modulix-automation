@@ -19,6 +19,10 @@ Linux execution environment. Public `ansible-playbook` arguments follow `--`.
 Do not paste item JSON into a terminal, command argument, environment value or
 file. The outer transport must validate its CLI/account identity, capture errors
 without secret output, and never retry a mutating playbook automatically.
+Input is limited to 1 MiB and must reach EOF within 30 seconds; a stalled or
+oversized producer fails before credential-memory allocation or Ansible launch.
+The memory profile retains the normal profile's collection search locations and
+explicitly disables controller output and target syslog of task arguments.
 
 The launcher creates a sealed, owner-bound anonymous memory descriptor and
 inherits only its numeric handle into Ansible. It uses the dedicated

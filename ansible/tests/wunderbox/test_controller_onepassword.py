@@ -79,6 +79,7 @@ class ControllerCredentialTests(unittest.TestCase):
             self.assertNotEqual(env.get(key), unsafe[key])
         self.assertEqual(env[MODULE.FD_ENV], "42")
         self.assertEqual(env["ANSIBLE_NO_LOG"], "true")
+        self.assertEqual(env["ANSIBLE_NO_TARGET_SYSLOG"], "true")
         self.assertEqual(env["PATH"], MODULE.SYSTEM_PATH)
         self.assertEqual(env["HOME"], self.runtime.name)
 
@@ -88,6 +89,65 @@ class ControllerCredentialTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     MODULE.launch(["--", "unused.yml"])
                 source.buffer.read.assert_not_called()
+                source.fileno.assert_not_called()
+
+    def test_stdin_pipe_eof_returns_exact_payload(self):
+        reader, writer = os.pipe()
+        try:
+            os.write(writer, b'{"synthetic":true}')
+        finally:
+            os.close(writer)
+        try:
+            self.assertEqual(MODULE.read_stdin(reader), b'{"synthetic":true}')
+        finally:
+            os.close(reader)
+
+    def test_stdin_stalled_and_partial_producers_have_deadline(self):
+        for partial in (b"", b'{"synthetic":'):
+            with self.subTest(partial=bool(partial)):
+                reader, writer = os.pipe()
+                try:
+                    if partial:
+                        os.write(writer, partial)
+                    with self.assertRaisesRegex(ValueError, "input deadline"):
+                        MODULE.read_stdin(reader, timeout=0.02)
+                finally:
+                    os.close(reader)
+                    os.close(writer)
+
+    def test_stdin_empty_and_oversize_rejected_exact_limit_accepted(self):
+        for size in (0, MODULE.LIMIT, MODULE.LIMIT + 1):
+            with self.subTest(size=size), tempfile.TemporaryFile() as source:
+                source.write(b"x" * size)
+                source.seek(0)
+                if size == MODULE.LIMIT:
+                    self.assertEqual(len(MODULE.read_stdin(source.fileno())), size)
+                else:
+                    with self.assertRaisesRegex(ValueError, "input size"):
+                        MODULE.read_stdin(source.fileno())
+
+    def test_memory_profile_effective_collection_and_logging_contract(self):
+        result = subprocess.run(
+            ["ansible-config", "dump", "--format", "json"],
+            env=dict(
+                os.environ, ANSIBLE_CONFIG=str(ROOT / "controller-onepassword.cfg")
+            ),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        settings = {
+            item["name"]: item["value"]
+            for item in json.loads(result.stdout)
+            if "name" in item
+        }
+        self.assertIn(
+            "/usr/share/automation-controller/collections",
+            settings["COLLECTIONS_PATHS"],
+        )
+        self.assertIs(settings["DEFAULT_NO_LOG"], True)
+        self.assertIs(settings["DEFAULT_NO_TARGET_SYSLOG"], True)
+        self.assertIs(settings["DISPLAY_ARGS_TO_STDOUT"], False)
 
     def test_namespace_init_requires_zero_parent(self):
         with patch.object(MODULE.os, "getpid", return_value=1):

@@ -13,12 +13,14 @@ import os
 from pathlib import Path
 import re
 import resource
+import select
 import signal
 import ssl
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 from ansible.errors import AnsibleError
 from ansible.plugins.lookup import LookupBase
@@ -260,6 +262,7 @@ def child_environment(fd, runtime_dir, agent_socket=None):
     env.update(
         **{FD_ENV: str(fd)},
         ANSIBLE_NO_LOG="true",
+        ANSIBLE_NO_TARGET_SYSLOG="true",
         ANSIBLE_DEBUG="false",
         ANSIBLE_LOG_PATH="/dev/null",
         ANSIBLE_CACHE_PLUGIN="memory",
@@ -311,6 +314,25 @@ def require_namespace_init():
         raise ValueError("one-shot execution as PID namespace init required")
 
 
+def read_stdin(fd, timeout=30):
+    # Bound wall time as well as bytes, before creating credential memory or
+    # starting Ansible. A producer that never closes its pipe must not hang PID 1.
+    deadline = time.monotonic() + timeout
+    payload = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+            raise ValueError("input deadline")
+        chunk = os.read(fd, min(65536, LIMIT + 1 - len(payload)))
+        if not chunk:
+            if not payload:
+                raise ValueError("input size")
+            return bytes(payload)
+        payload.extend(chunk)
+        if len(payload) > LIMIT:
+            raise ValueError("input size")
+
+
 def launch(args):
     require_namespace_init()
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -328,9 +350,7 @@ def launch(args):
         for arg in args[1:]
     ):
         raise ValueError("legacy password options are outside the memory profile")
-    payload = sys.stdin.buffer.read(LIMIT + 1)
-    if not 0 < len(payload) <= LIMIT:
-        raise ValueError("input size")
+    payload = read_stdin(sys.stdin.fileno())
     decode(payload)
     fd = os.memfd_create(MEMORY_NAME, os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC)
     try:
