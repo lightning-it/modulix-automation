@@ -21,7 +21,7 @@ collections:
   - name: lit.supplementary
     version: "3.6.0"
   - name: lit.foundational
-    version: "1.32.0"
+    version: "1.34.0"
   - name: https://github.com/lightning-it/ansible-collection-rhel/releases/download/v1.23.0/lit-rhel-1.23.0.tar.gz
     type: url
   - name: lit.ubuntu
