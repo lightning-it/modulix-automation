@@ -7,7 +7,7 @@ collections:
     # lit.supplementary 3.6.0 declares this exact collection contract.
     version: "5.10.0"
   - name: vmware.vmware
-    version: "2.10.0"
+    version: "2.11.0"
   - name: community.crypto
     version: "3.4.0"
   - name: community.hashi_vault
