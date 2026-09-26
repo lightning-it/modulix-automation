@@ -1081,7 +1081,8 @@ jobs:
           # The centrally protected immutable v5-successor authorization is
           # an optional, known skipped job on unrelated repositories/PRs. It
           # is never review evidence. Routed S0 jobs are accepted only as skipped.
-          synthetic_evidence_jobs=$(jq -c '[.[] | select(.runner_id == null and (.steps | length) == 0) | select(.name == "Current revision review" or .name == "Protected current-revision verifier")]' <<<"${attempt_one_jobs}")
+          synthetic_evidence_jobs=$(jq -c '[.[] | select(.runner_id == null and (.steps | length) == 0) | select(.name == "Current revision review" or .name == "Protected current-revision verifier") | select(.run_attempt == 1 and .status == "completed" and .conclusion == "success")]' <<<"${attempt_one_jobs}")
+          test "$(jq 'length' <<<"${synthetic_evidence_jobs}")" -le 2
           synthetic_authorization_jobs=$(jq -c '[.[] | select(.runner_id == null and (.steps | length) == 0) | select(.name == "Authorize exact Supplementary catch-up v5 successor") | select(.run_attempt == 1 and .status == "completed" and .conclusion == "skipped")]' <<<"${attempt_one_jobs}")
           test "$(jq 'length' <<<"${synthetic_authorization_jobs}")" -le 1
           runner_backed_jobs=$(jq -c \
