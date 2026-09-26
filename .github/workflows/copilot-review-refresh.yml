@@ -1181,7 +1181,11 @@ jobs:
                   (type == "object") and ((.body | type) == "string")
                   and .pull_request_review_id == $review_id)
               then ([$review.body] + [$pages[][]? | .body]
-                | map(ascii_downcase | gsub("\\p{White_Space}"; ""))) as $parts
+                | map(
+                    ascii_downcase
+                    | gsub("wasn[\u0027\u2019]t"; "was not")
+                    | gsub("\\p{White_Space}"; "")
+                  )) as $parts
                 | if any($parts[]; length > 0) then ($parts | join("|"))
                   else error("review content is empty") end
               else error("review body or inline comments are malformed")
@@ -1189,7 +1193,7 @@ jobs:
             ' <(printf '%s\n' "${review_payload}") \
               <(printf '%s\n' "${review_comment_pages}"))"
             case "${normalized_review_body}" in
-              *unabletoreviewthispullrequest*|*nofilestoreview*|*abletoreviewanyfiles*|*quotaexhausted*|*quotaexceeded*|*premiumrequestquota*|*premiumrequestsquota*|*suppressedcomment*|*encounteredanerror*)
+              *unabletoreviewthispullrequest*|*wasnotabletoreviewthispullrequest*|*nofilestoreview*|*abletoreviewanyfiles*|*quotaexhausted*|*quotaexceeded*|*premiumrequestquota*|*premiumrequestsquota*|*suppressedcomment*|*encounteredanerror*)
                 return 1
                 ;;
             esac
