@@ -1173,14 +1173,14 @@ jobs:
             normalized_review_body="$(jq -ers --argjson review_id "${REVIEW_ID}" '
               .[0] as $review | .[1] as $pages |
               if (($review | type) == "object") and ($review | has("body"))
-                and (($review.body | type) == "string")
+                and (($review.body == null) or (($review.body | type) == "string"))
                 and (($pages | type) == "array")
                 and (($pages | length) > 0)
                 and all($pages[]?; type == "array")
                 and all($pages[][]?;
                   (type == "object") and ((.body | type) == "string")
                   and .pull_request_review_id == $review_id)
-              then ([$review.body] + [$pages[][]? | .body]
+              then ([($review.body // "")] + [$pages[][]? | .body]
                 | map(
                     ascii_downcase
                     | gsub("wasn[\u0027\u2019]t"; "was not")
